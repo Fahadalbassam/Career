@@ -110,10 +110,118 @@ def get_candidates() -> List[Opportunity]:
     """
     return list(PLACEHOLDER_OPPORTUNITIES)
 
+def filter_candidates(
+    profile: ParsedProfile,
+    candidates: List[Opportunity],
+) -> List[Opportunity]:
+    """
+    Filter candidate opportunities before scoring.
+
+    This uses safe filtering:
+    - If a filter keeps some results, we apply it.
+    - If a filter would remove everything, we skip it.
+
+    This prevents the recommender from returning zero results too easily.
+    """
+    filtered = list(candidates)
+
+    # 1. Keep opportunities with a source URL.
+    # For now, source_url is our simple verification signal.
+    with_source = [opp for opp in filtered if opp.source_url]
+    if with_source:
+        filtered = with_source
+
+    # 2. Prefer opportunities that match the student's major.
+    if profile.major:
+        major_matches = [
+            opp for opp in filtered
+            if not opp.major_fit or profile.major in opp.major_fit
+        ]
+        if major_matches:
+            filtered = major_matches
+
+    # 3. Prefer opportunities that match the requested program type.
+    if profile.program_type:
+        program_matches = [
+            opp for opp in filtered
+            if opp.program_type.lower() == profile.program_type.lower()
+        ]
+        if program_matches:
+            filtered = program_matches
+
+    return filtered
+
+def build_recommendation_reasons(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+) -> tuple[List[str], List[str]]:
+    """
+    Build human-readable reasons explaining why an opportunity was recommended.
+
+    Args:
+        profile: Parsed student profile.
+        opportunity: Candidate opportunity.
+
+    Returns:
+        A tuple:
+        - List of explanation reasons.
+        - List of matched student skills.
+    """
+    reasons: List[str] = []
+
+    # 1. Major match
+    if profile.major and profile.major in opportunity.major_fit:
+        reasons.append(f"Matches your major: {profile.major}")
+
+    # 2. City match
+    if profile.city and profile.city.lower() == opportunity.city.lower():
+        reasons.append(f"Matches your preferred city: {profile.city}")
+
+    # 3. Work mode match
+    if profile.work_mode and profile.work_mode.lower() == opportunity.work_mode.lower():
+        reasons.append(f"Matches your preferred work mode: {profile.work_mode}")
+
+    # 4. Program type match
+    if profile.program_type and profile.program_type.lower() == opportunity.program_type.lower():
+        reasons.append(f"Matches your preferred program type: {profile.program_type}")
+
+    # 5. Interest match
+    if profile.interest and profile.interest.lower() in opportunity.title.lower():
+        reasons.append(f"Matches your interest in {profile.interest}")
+
+    # 6. Source URL / verification
+    if opportunity.source_url:
+        reasons.append("Has a verified source URL")
+
+    # 7. Skill matches
+    searchable_text = " ".join(
+        [
+            opportunity.title,
+            opportunity.requirements,
+            " ".join(opportunity.skills_list),
+        ]
+    ).lower()
+
+    skills_matched = [
+        skill for skill in profile.skills
+        if skill.lower() in searchable_text
+    ]
+
+    if skills_matched:
+        reasons.append(
+            "Matches your skills: " + ", ".join(skills_matched)
+        )
+
+    # Fallback reason if no specific reason was found
+    if not reasons:
+        reasons.append("Recommended based on overall profile similarity")
+
+    return reasons, skills_matched
+
 
 def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     """
-    Score and rank all candidate opportunities for the given student profile.
+    Filter, score, and rank candidate opportunities for the given student profile.
 
     Args:
         profile: Parsed student profile containing filters.
@@ -124,13 +232,31 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     """
     candidates = get_candidates()
 
+    # Step 1: filter weak candidates first
+    candidates = filter_candidates(profile, candidates)
+
+    # Step 2: score remaining candidates
     scored: List[Opportunity] = []
     for opp in candidates:
         score = compute_score(profile, opp)
-        # Create a new instance with the computed score
-        scored.append(opp.model_copy(update={"score": score}))
+        reasons, skills_matched = build_recommendation_reasons(profile, opp)
 
+    # Create a new instance with the computed score and explanation fields.
+        scored.append(
+            opp.model_copy(
+                update={
+                    "score": score,
+                    "why_recommended": reasons,
+                    "skills_matched": skills_matched,
+                }
+            )
+        )
+    
+
+    # Step 3: sort highest score first
     scored.sort(key=lambda o: o.score, reverse=True)
+
+    # Step 4: return Top N
     return scored[:top_n]
 
 

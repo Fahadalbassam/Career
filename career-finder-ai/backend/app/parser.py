@@ -89,6 +89,45 @@ SKILL_KEYWORDS: List[str] = [
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+def _normalize_text(message: str) -> str:
+    """
+    Normalize raw student text before extracting profile fields.
+
+    This makes different writing styles easier to detect.
+    Example:
+        "Cyber Security CO-OP in Riyadh!!!"
+        becomes
+        "cybersecurity coop in riyadh"
+    """
+    text = message.lower().strip()
+
+    # Normalize common symbols/dashes
+    text = text.replace("–", "-").replace("—", "-")
+
+    # Normalize common phrases
+    text = re.sub(r"\bcyber\s+security\b", "cybersecurity", text)
+    text = re.sub(r"\bco\s*-\s*op\b", "coop", text)
+    text = re.sub(r"\bco\s+op\b", "coop", text)
+    text = re.sub(r"\bcooperative\s+training\b", "coop", text)
+
+    # Normalize work mode phrases
+    text = re.sub(r"\bon\s*-\s*site\b", "on-site", text)
+    text = re.sub(r"\bon\s+site\b", "on-site", text)
+    text = re.sub(r"\bin\s+person\b", "on-site", text)
+    text = re.sub(r"\bwork\s+from\s+home\b", "remote", text)
+
+    # Normalize common skill names
+    text = re.sub(r"\bpowerbi\b", "power bi", text)
+    text = re.sub(r"\bscikit\s+learn\b", "scikit-learn", text)
+
+    # Remove unnecessary punctuation but keep useful symbols for skills
+    # Keeps: +, #, and - for skills like C++, C#, scikit-learn, on-site
+    text = re.sub(r"[^a-z0-9+#\-\s]", " ", text)
+
+    # Collapse repeated spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 def _find_major(text: str) -> Optional[str]:
     """Return the first matching major code from the text."""
@@ -150,7 +189,7 @@ def parse_message(message: str) -> ParsedProfile:
     Returns:
         A :class:`ParsedProfile` with detected fields (``None`` when not found).
     """
-    normalised = message.lower().strip()
+    normalised = _normalize_text(message)
 
     major = _find_major(normalised)
     city = _find_city(normalised)
