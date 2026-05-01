@@ -1,0 +1,192 @@
+"""
+test_scoring.py – Unit tests for the opportunity scoring functions.
+"""
+
+import pytest
+from app.schemas import Opportunity, ParsedProfile
+from app.scoring import (
+    city_match_score,
+    compute_score,
+    interest_match_score,
+    major_fit_score,
+    verified_source_bonus,
+    work_mode_match_score,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+def make_opportunity(**kwargs) -> Opportunity:
+    """Helper to create an Opportunity with sensible defaults."""
+    defaults = {
+        "id": 1,
+        "company": "Test Co",
+        "title": "Data Science COOP",
+        "city": "Riyadh",
+        "work_mode": "Remote",
+        "program_type": "COOP",
+        "major_fit": ["DS", "CS"],
+        "source_url": "https://example.com",
+        "score": 0.0,
+    }
+    defaults.update(kwargs)
+    return Opportunity(**defaults)
+
+
+def make_profile(**kwargs) -> ParsedProfile:
+    """Helper to create a ParsedProfile with sensible defaults."""
+    defaults = {
+        "major": "DS",
+        "city": "Riyadh",
+        "interest": "Data Science",
+        "work_mode": "Remote",
+        "program_type": "COOP",
+        "skills": [],
+    }
+    defaults.update(kwargs)
+    return ParsedProfile(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# major_fit_score
+# ---------------------------------------------------------------------------
+
+def test_major_fit_score_exact_match():
+    profile = make_profile(major="DS")
+    opp = make_opportunity(major_fit=["DS", "CS"])
+    assert major_fit_score(profile, opp) == 1.0
+
+
+def test_major_fit_score_no_match():
+    profile = make_profile(major="CYS")
+    opp = make_opportunity(major_fit=["DS", "CS"])
+    assert major_fit_score(profile, opp) == 0.0
+
+
+def test_major_fit_score_empty_list_returns_half():
+    profile = make_profile(major="CE")
+    opp = make_opportunity(major_fit=[])
+    assert major_fit_score(profile, opp) == 0.5
+
+
+def test_major_fit_score_no_major_in_profile():
+    profile = make_profile(major=None)
+    opp = make_opportunity(major_fit=["DS"])
+    assert major_fit_score(profile, opp) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# city_match_score
+# ---------------------------------------------------------------------------
+
+def test_city_match_score_exact():
+    profile = make_profile(city="Riyadh")
+    opp = make_opportunity(city="Riyadh", work_mode="On-site")
+    assert city_match_score(profile, opp) == 1.0
+
+
+def test_city_match_score_no_match():
+    profile = make_profile(city="Jeddah")
+    opp = make_opportunity(city="Riyadh", work_mode="On-site")
+    assert city_match_score(profile, opp) == 0.0
+
+
+def test_city_match_score_remote_opportunity():
+    profile = make_profile(city="Jeddah")
+    opp = make_opportunity(city="Riyadh", work_mode="Remote")
+    assert city_match_score(profile, opp) == 0.5
+
+
+def test_city_match_score_no_preference():
+    profile = make_profile(city=None)
+    opp = make_opportunity(city="Riyadh", work_mode="On-site")
+    assert city_match_score(profile, opp) == 0.5
+
+
+# ---------------------------------------------------------------------------
+# work_mode_match_score
+# ---------------------------------------------------------------------------
+
+def test_work_mode_match_exact():
+    profile = make_profile(work_mode="Remote")
+    opp = make_opportunity(work_mode="Remote")
+    assert work_mode_match_score(profile, opp) == 1.0
+
+
+def test_work_mode_match_no_match():
+    profile = make_profile(work_mode="On-site")
+    opp = make_opportunity(work_mode="Remote")
+    assert work_mode_match_score(profile, opp) == 0.0
+
+
+def test_work_mode_match_no_preference():
+    profile = make_profile(work_mode=None)
+    opp = make_opportunity(work_mode="Remote")
+    assert work_mode_match_score(profile, opp) == 0.5
+
+
+# ---------------------------------------------------------------------------
+# interest_match_score
+# ---------------------------------------------------------------------------
+
+def test_interest_match_score_found_in_title():
+    profile = make_profile(interest="Data Science")
+    opp = make_opportunity(title="Data Science COOP Program")
+    assert interest_match_score(profile, opp) == 1.0
+
+
+def test_interest_match_score_not_found():
+    profile = make_profile(interest="Cybersecurity")
+    opp = make_opportunity(title="Data Science COOP Program")
+    assert interest_match_score(profile, opp) == 0.0
+
+
+def test_interest_match_score_no_interest():
+    profile = make_profile(interest=None)
+    opp = make_opportunity(title="Data Science COOP Program")
+    assert interest_match_score(profile, opp) == 0.5
+
+
+# ---------------------------------------------------------------------------
+# verified_source_bonus
+# ---------------------------------------------------------------------------
+
+def test_verified_source_bonus_with_url():
+    opp = make_opportunity(source_url="https://example.com")
+    assert verified_source_bonus(opp) == 0.1
+
+
+def test_verified_source_bonus_without_url():
+    opp = make_opportunity(source_url="")
+    assert verified_source_bonus(opp) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# compute_score
+# ---------------------------------------------------------------------------
+
+def test_compute_score_perfect_match():
+    profile = make_profile(major="DS", city="Riyadh", work_mode="Remote",
+                           interest="Data Science", program_type="COOP")
+    opp = make_opportunity(major_fit=["DS"], city="Riyadh", work_mode="Remote",
+                           title="Data Science COOP", source_url="https://example.com")
+    score = compute_score(profile, opp)
+    assert score > 0.8
+
+
+def test_compute_score_poor_match():
+    profile = make_profile(major="CYS", city="Jeddah", work_mode="On-site",
+                           interest="Cybersecurity")
+    opp = make_opportunity(major_fit=["DS"], city="Riyadh", work_mode="Remote",
+                           title="Data Science COOP", source_url="")
+    score = compute_score(profile, opp)
+    assert score < 0.5
+
+
+def test_compute_score_within_bounds():
+    profile = make_profile()
+    opp = make_opportunity()
+    score = compute_score(profile, opp)
+    assert 0.0 <= score <= 1.0

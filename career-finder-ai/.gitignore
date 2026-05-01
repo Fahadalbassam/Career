@@ -1,0 +1,50 @@
+# =============================================================================
+# Career Finder AI – .gitignore
+# =============================================================================
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables (NEVER commit these)
+.env
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Trained model artefacts
+models/*.joblib
+models/*.pkl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node / Next.js
+node_modules/
+.next/
+dist/
+.npm/
+
+# macOS
+.DS_Store
+
+# VS Code local config (keep extensions.json and settings.json)
+.vscode/.ropeproject/
+
+# Build artefacts
+build/
+*.egg-info/
+dist/
+
+# Test and coverage artefacts
+.pytest_cache/
+.coverage
+htmlcov/
