@@ -9,6 +9,8 @@ from app.scoring import (
     compute_score,
     interest_match_score,
     major_fit_score,
+    program_type_match_score,
+    skills_match_score,
     verified_source_bonus,
     work_mode_match_score,
 )
@@ -168,20 +170,54 @@ def test_verified_source_bonus_without_url():
 # ---------------------------------------------------------------------------
 
 def test_compute_score_perfect_match():
-    profile = make_profile(major="DS", city="Riyadh", work_mode="Remote",
-                           interest="Data Science", program_type="COOP")
-    opp = make_opportunity(major_fit=["DS"], city="Riyadh", work_mode="Remote",
-                           title="Data Science COOP", source_url="https://example.com")
+    profile = make_profile(
+        major="DS",
+        city="Riyadh",
+        work_mode="Remote",
+        interest="Data Science",
+        program_type="COOP",
+        skills=["python", "sql"],
+    )
+
+    opp = make_opportunity(
+        major_fit=["DS"],
+        city="Riyadh",
+        work_mode="Remote",
+        program_type="COOP",
+        title="Data Science COOP",
+        requirements="Python and SQL are required",
+        skills_list=["python", "sql", "data analysis"],
+        source_url="https://example.com",
+    )
+
+
     score = compute_score(profile, opp)
+
     assert score > 0.8
 
-
 def test_compute_score_poor_match():
-    profile = make_profile(major="CYS", city="Jeddah", work_mode="On-site",
-                           interest="Cybersecurity")
-    opp = make_opportunity(major_fit=["DS"], city="Riyadh", work_mode="Remote",
-                           title="Data Science COOP", source_url="")
+    profile = make_profile(
+        major="DS",
+        city="Riyadh",
+        work_mode="Remote",
+        interest="Data Science",
+        program_type="COOP",
+        skills=["python", "sql"],
+    )
+
+    opp = make_opportunity(
+        major_fit=["CYS"],
+        city="Jeddah",
+        work_mode="On-site",
+        program_type="Internship",
+        title="Cybersecurity Internship",
+        requirements="Networking and security knowledge required",
+        skills_list=["networking", "security"],
+        source_url="",
+    )
+
     score = compute_score(profile, opp)
+
     assert score < 0.5
 
 
@@ -190,3 +226,160 @@ def test_compute_score_within_bounds():
     opp = make_opportunity()
     score = compute_score(profile, opp)
     assert 0.0 <= score <= 1.0
+
+# ---------------------------------------------------------------------------
+# program_type_match_score
+# ---------------------------------------------------------------------------
+
+def test_program_type_match_exact():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="COOP")
+    assert program_type_match_score(profile, opp) == 1.0
+
+
+def test_program_type_match_no_match():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="Internship")
+    assert program_type_match_score(profile, opp) == 0.0
+
+
+def test_program_type_match_no_preference():
+    profile = make_profile(program_type=None)
+    opp = make_opportunity(program_type="Internship")
+    assert program_type_match_score(profile, opp) == 0.5
+
+
+    # ---------------------------------------------------------------------------
+# skills_match_score
+# ---------------------------------------------------------------------------
+
+def test_skills_match_score_all_skills_match():
+    profile = make_profile(skills=["python", "sql"])
+    opp = make_opportunity(
+        title="Data Science COOP",
+        requirements="Python and SQL are required",
+        skills_list=["python", "sql", "data analysis"],
+    )
+
+    assert skills_match_score(profile, opp) == 1.0
+
+
+def test_skills_match_score_partial_match():
+    profile = make_profile(skills=["python", "sql"])
+    opp = make_opportunity(
+        title="Data Science COOP",
+        requirements="Python is required",
+        skills_list=["python"],
+    )
+
+    assert skills_match_score(profile, opp) == 0.5
+
+
+def test_skills_match_score_no_match():
+    profile = make_profile(skills=["python", "sql"])
+    opp = make_opportunity(
+        title="Cybersecurity Internship",
+        requirements="Networking knowledge is required",
+        skills_list=["networking"],
+    )
+
+    assert skills_match_score(profile, opp) == 0.0
+
+
+def test_skills_match_score_no_student_skills():
+    profile = make_profile(skills=[])
+    opp = make_opportunity(
+        title="Data Science COOP",
+        requirements="Python and SQL are required",
+        skills_list=["python", "sql"],
+    )
+
+    assert skills_match_score(profile, opp) == 0.5
+
+def test_program_type_match_coop_with_mixed_type():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="COOP/Internship")
+
+    assert program_type_match_score(profile, opp) == 1.0
+
+
+def test_program_type_match_internship_with_mixed_type():
+    profile = make_profile(program_type="Internship")
+    opp = make_opportunity(program_type="COOP/Internship")
+
+    assert program_type_match_score(profile, opp) == 1.0
+
+
+def test_program_type_match_training_partial_match_for_coop():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="Training")
+
+    assert program_type_match_score(profile, opp) == 0.5
+
+
+def test_program_type_match_graduate_program_no_match_for_coop():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="Graduate Program")
+
+    assert program_type_match_score(profile, opp) == 0.0
+
+def test_work_mode_on_site_matches_in_person():
+    profile = make_profile(work_mode="On-site")
+    opp = make_opportunity(work_mode="In person")
+
+    assert work_mode_match_score(profile, opp) == 1.0
+
+
+def test_work_mode_on_site_matches_onsite():
+    profile = make_profile(work_mode="On-site")
+    opp = make_opportunity(work_mode="Onsite")
+
+    assert work_mode_match_score(profile, opp) == 1.0
+
+
+def test_work_mode_remote_matches_hybrid_partially():
+    profile = make_profile(work_mode="Remote")
+    opp = make_opportunity(work_mode="Hybrid")
+
+    assert work_mode_match_score(profile, opp) == 0.7
+
+
+def test_work_mode_hybrid_matches_remote_partially():
+    profile = make_profile(work_mode="Hybrid")
+    opp = make_opportunity(work_mode="Remote")
+
+    assert work_mode_match_score(profile, opp) == 0.7
+
+
+def test_work_mode_not_stated_gets_small_score():
+    profile = make_profile(work_mode="Remote")
+    opp = make_opportunity(work_mode="Not stated")
+
+    assert work_mode_match_score(profile, opp) == 0.3
+
+def test_city_match_same_eastern_province_cluster():
+    profile = make_profile(city="Dammam")
+    opp = make_opportunity(city="Dhahran")
+
+    assert city_match_score(profile, opp) == 0.7
+
+
+def test_city_match_flexible_saudi_arabia():
+    profile = make_profile(city="Jeddah")
+    opp = make_opportunity(city="Saudi Arabia")
+
+    assert city_match_score(profile, opp) == 0.5
+
+
+def test_city_match_flexible_multiple():
+    profile = make_profile(city="Riyadh")
+    opp = make_opportunity(city="Multiple")
+
+    assert city_match_score(profile, opp) == 0.5
+
+
+def test_city_match_not_stated_small_score():
+    profile = make_profile(city="Riyadh")
+    opp = make_opportunity(city="Not stated")
+
+    assert city_match_score(profile, opp) == 0.3
