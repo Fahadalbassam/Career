@@ -36,16 +36,53 @@ class RecommendRequest(BaseModel):
 # Response schemas
 # ---------------------------------------------------------------------------
 
-class ParsedProfile(BaseModel):
-    """Structured student profile extracted from a free-text message."""
+class StudentProfile(BaseModel):
+    """
+    Structured student profile used by the recommendation engine.
 
-    major: Optional[str] = Field(None, description="Detected academic major code.")
-    city: Optional[str] = Field(None, description="Detected preferred city.")
-    interest: Optional[str] = Field(None, description="Detected area of interest.")
-    work_mode: Optional[str] = Field(None, description="Remote, On-site, or Hybrid.")
-    program_type: Optional[str] = Field(None, description="COOP or Internship.")
-    skills: List[str] = Field(default_factory=list, description="List of detected skills.")
+    This represents the student's major, location, interests, preferred work mode,
+    preferred program type, and skills.
+    """
 
+    major: Optional[str] = Field(
+        default=None,
+        description="Student major code, e.g. CS, AI, CYS, CIS, DS, DE, CE, FT.",
+    )
+
+    city: Optional[str] = Field(
+        default=None,
+        description="Preferred city, e.g. Riyadh, Jeddah, Dammam, Khobar, Dhahran.",
+    )
+
+    interest: Optional[str] = Field(
+        default=None,
+        description="Student interest area, e.g. Cybersecurity, Data Science, Software Development.",
+    )
+
+    work_mode: Optional[str] = Field(
+        default=None,
+        description="Preferred work mode, e.g. Remote, On-site, Hybrid.",
+    )
+
+    program_type: Optional[str] = Field(
+        default=None,
+        description="Preferred opportunity type, e.g. COOP or Internship.",
+    )
+
+    skills: List[str] = Field(
+        default_factory=list,
+        description="Student skills, e.g. Python, SQL, Linux, Power BI.",
+    )
+
+
+class ParsedProfile(StudentProfile):
+    """
+    Backward-compatible name used by the parser and API.
+
+    For now, ParsedProfile and StudentProfile have the same fields.
+    Later, the parser will return ParsedProfile after reading a student message.
+    """
+    pass
 
 class Opportunity(BaseModel):
     """A single COOP/internship opportunity."""
@@ -57,9 +94,17 @@ class Opportunity(BaseModel):
     work_mode: str
     program_type: str
     major_fit: List[str] = Field(default_factory=list)
+
+    # Extra details used for matching and explanations
+    requirements: str = ""
+    skills_list: List[str] = Field(default_factory=list)
+
     source_url: str
     score: float = Field(0.0, ge=0.0, le=1.0, description="Composite fit score.")
 
+    # Explanation fields returned to the frontend
+    why_recommended: List[str] = Field(default_factory=list)
+    skills_matched: List[str] = Field(default_factory=list)
 
 class RecommendResponse(BaseModel):
     """Response from the /recommend endpoint."""

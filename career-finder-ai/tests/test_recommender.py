@@ -3,7 +3,15 @@ test_recommender.py – Unit tests for the recommendation engine.
 """
 
 import pytest
-from app.recommender import recommend, recommend_from_message, get_candidates
+import pandas as pd
+
+from app.recommender import (
+    recommend,
+    recommend_from_message,
+    get_candidates,
+    filter_candidates,
+    load_opportunities_from_xlsx
+)
 from app.parser import parse_message
 from app.schemas import ParsedProfile
 
@@ -23,6 +31,45 @@ def test_get_candidates_are_opportunities():
     candidates = get_candidates()
     for c in candidates:
         assert isinstance(c, Opportunity)
+
+# ---------------------------------------------------------------------------
+# filter_candidates
+# ---------------------------------------------------------------------------
+
+def test_filter_candidates_prefers_major_matches():
+    profile = ParsedProfile(
+        major="AI",
+        city=None,
+        interest=None,
+        work_mode=None,
+        program_type=None,
+        skills=[],
+    )
+
+    candidates = get_candidates()
+    filtered = filter_candidates(profile, candidates)
+
+    assert len(filtered) > 0
+    for opp in filtered:
+        assert not opp.major_fit or "AI" in opp.major_fit
+
+
+def test_filter_candidates_prefers_program_type_matches():
+    profile = ParsedProfile(
+        major=None,
+        city=None,
+        interest=None,
+        work_mode=None,
+        program_type="COOP",
+        skills=[],
+    )
+
+    candidates = get_candidates()
+    filtered = filter_candidates(profile, candidates)
+
+    assert len(filtered) > 0
+    for opp in filtered:
+        assert opp.program_type == "COOP"        
 
 
 # ---------------------------------------------------------------------------
@@ -127,3 +174,97 @@ def test_recommend_from_message_has_recommendations():
 def test_recommend_from_message_total_candidates_positive():
     response = recommend_from_message("AI student")
     assert response.total_candidates > 0
+
+
+def test_recommendations_include_explanation_reasons():
+    profile = ParsedProfile(
+        major="CYS",
+        city="Riyadh",
+        interest="Cybersecurity",
+        work_mode="Hybrid",
+        program_type="Internship",
+        skills=[],
+    )
+
+    results = recommend(profile, top_n=5)
+
+    assert len(results) > 0
+    assert isinstance(results[0].why_recommended, list)
+    assert len(results[0].why_recommended) > 0
+
+def test_recommendations_include_skill_matches():
+    profile = ParsedProfile(
+        major="CYS",
+        city="Riyadh",
+        interest="Cybersecurity",
+        work_mode=None,
+        program_type=None,
+        skills=["linux", "network security"],
+    )
+
+    results = recommend(profile, top_n=5)
+
+    assert len(results) > 0
+
+    results_with_skill_matches = [
+        opp for opp in results
+        if len(opp.skills_matched) > 0
+    ]
+
+    assert len(results_with_skill_matches) > 0
+
+    all_matched_skills = []
+    for opp in results_with_skill_matches:
+        all_matched_skills.extend(opp.skills_matched)
+
+    assert "linux" in all_matched_skills or "network security" in all_matched_skills
+
+def test_recommendations_explain_skill_matches():
+    profile = ParsedProfile(
+        major="CYS",
+        city="Riyadh",
+        interest="Cybersecurity",
+        work_mode=None,
+        program_type=None,
+        skills=["linux", "network security"],
+    )
+
+    results = recommend(profile, top_n=5)
+
+    assert len(results) > 0
+
+    all_reasons = []
+    for opp in results:
+        all_reasons.extend(opp.why_recommended)
+
+    assert any("Matches your skills" in reason for reason in all_reasons)
+
+def test_load_opportunities_from_xlsx(tmp_path):
+    xlsx_file = tmp_path / "opportunities_clean.xlsx"
+
+    data = {
+        "id": [1],
+        "company": ["STC"],
+        "title": ["Cybersecurity Internship"],
+        "city": ["Riyadh"],
+        "work_mode": ["Hybrid"],
+        "program_type": ["Internship"],
+        "major_fit": ["CYS,CS"],
+        "requirements": ["Linux and network security"],
+        "skills_list": ["linux,network security"],
+        "source_url": ["https://example.com"],
+    }
+
+    df = pd.DataFrame(data)
+    df.to_excel(xlsx_file, sheet_name="Opportunities", index=False)
+
+    opportunities = load_opportunities_from_xlsx(xlsx_file)
+
+    assert len(opportunities) == 1
+    assert opportunities[0].company == "STC"
+    assert opportunities[0].title == "Cybersecurity Internship"
+    assert opportunities[0].city == "Riyadh"
+    assert opportunities[0].work_mode == "Hybrid"
+    assert opportunities[0].program_type == "Internship"
+    assert opportunities[0].major_fit == ["CYS", "CS"]
+    assert opportunities[0].skills_list == ["linux", "network security"]

@@ -1,52 +1,48 @@
-# Frontend – Career Finder AI
+# Career Finder AI — Frontend
 
-> **Status: Placeholder – Do not build yet.**
+Next.js (App Router) UI for **Career Finder AI**: Saudi COOP and internship recommendations for computing students. This package currently ships **layout, navigation, and placeholder routes** only — no backend, auth, or database calls yet.
 
-The final frontend UI for Career Finder AI may use the following stack:
+## Prerequisites
 
-- **Next.js** (React framework)
-- **TypeScript**
-- **Tailwind CSS**
-- **shadcn/ui** component library
+- [Node.js](https://nodejs.org/) (LTS recommended)
+- npm (bundled with Node)
 
----
+## Install dependencies
 
-## ⚠️ Build Order – Frontend comes last
-
-Please complete the following steps **before** starting frontend development:
-
-1. ✅ Dataset cleaning (`data/` + `backend/app/clean_data.py`)
-2. ✅ ML model training (`backend/app/train_model.py`)
-3. ✅ Recommender engine (`backend/app/recommender.py`)
-4. ✅ Backend API working and tested (`backend/app/main.py`)
-5. 🔜 **Then** start frontend polish
-
----
-
-## When Ready – Setup Commands
+From this directory (`career-finder-ai/frontend`):
 
 ```bash
-cd frontend
-npx create-next-app@latest . --typescript --tailwind --eslint --app
-npx shadcn@latest init
-npx shadcn@latest add button card input badge select textarea separator tabs dialog
+npm install
 ```
 
----
+## Run the development server
 
-## Planned Pages
+```bash
+npm run dev
+```
 
-| Page | Description |
-|------|-------------|
-| `/` | Landing page with search/chat input |
-| `/results` | Top 5 recommendation cards |
-| `/opportunity/[id]` | Opportunity detail page |
-| `/about` | Project info and team |
+Open [http://localhost:3000](http://localhost:3000). The app uses the Next.js App Router under `src/app/`.
 
----
+Other scripts:
 
-## Notes
+- `npm run build` — production build
+- `npm run start` — serve production build
+- `npm run lint` — ESLint
 
-- The backend API will be consumed via `fetch` / `axios` from the Next.js frontend.
-- Environment variable `NEXT_PUBLIC_API_URL` will point to the FastAPI backend.
-- Components will use `shadcn/ui` for consistent, accessible UI elements.
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Marketing-style home: hero, CTAs to chat and search, three feature cards |
+| `/chat` | Placeholder for the future career-match conversation |
+| `/search` | Placeholder for manual browsing / filters |
+| `/dashboard` | Placeholder for saved progress and history |
+| `/model` | Placeholder for model documentation |
+| `/methodology` | Placeholder for methodology and data explainers |
+
+Global chrome: top **Career Finder AI** navbar with links to all of the above. The root layout wraps the tree with shadcn/ui **`TooltipProvider`** for tooltip primitives.
+
+## Stack
+
+- **Next.js** (App Router), **React**, **TypeScript**
+- **Tailwind CSS** v4 and **shadcn/ui** (Radix-based components in `src/components/ui/`)

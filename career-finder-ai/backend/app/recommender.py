@@ -6,28 +6,35 @@ Replace ``_get_placeholder_candidates`` with a database query once the dataset
 is loaded and the ML model is trained.
 """
 
+
+from pathlib import Path
 from typing import List
+
+import pandas as pd
 
 from app.parser import parse_message
 from app.schemas import Opportunity, ParsedProfile, RecommendResponse
 from app.scoring import compute_score
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OPPORTUNITIES_XLSX_PATH = REPO_ROOT / "data" / "processed" / "CareerFinder_Final_cleaned.xlsx"
 
 
 # ---------------------------------------------------------------------------
 # Placeholder candidate pool
 # ---------------------------------------------------------------------------
 
-PLACEHOLDER_OPPORTUNITIES: List[Opportunity] = [
+PLACEHOLDER_OPPORTUNITIES = [
     Opportunity(
         id=1,
-        company="Saudi Aramco",
-        title="Data Science COOP",
+        company="Aramco Digital",
+        title="AI and Data Science COOP",
         city="Dhahran",
         work_mode="On-site",
         program_type="COOP",
-        major_fit=["DS", "CS", "AI", "DE"],
-        source_url="https://www.aramco.com/careers",
-        score=0.0,
+        major_fit=["AI", "DS", "CS"],
+        requirements="Python, machine learning, data analysis, SQL, statistics",
+        skills_list=["python", "machine learning", "data analysis", "sql", "statistics"],
+        source_url="https://aramcodigital.com/careers",
     ),
     Opportunity(
         id=2,
@@ -37,63 +44,69 @@ PLACEHOLDER_OPPORTUNITIES: List[Opportunity] = [
         work_mode="Hybrid",
         program_type="Internship",
         major_fit=["CYS", "CS", "CE"],
+        requirements="Network security, SOC monitoring, vulnerability assessment, Linux",
+        skills_list=["network security", "soc", "vulnerability assessment", "linux"],
         source_url="https://www.stc.com.sa/careers",
-        score=0.0,
     ),
     Opportunity(
         id=3,
-        company="Elm Company",
-        title="Artificial Intelligence COOP",
+        company="Elm",
+        title="Software Engineering COOP",
         city="Riyadh",
         work_mode="On-site",
         program_type="COOP",
-        major_fit=["AI", "CS", "DS"],
+        major_fit=["CS", "CIS", "AI"],
+        requirements="Backend development, APIs, databases, Java, Python",
+        skills_list=["backend", "api", "databases", "java", "python"],
         source_url="https://www.elm.sa/careers",
-        score=0.0,
     ),
     Opportunity(
         id=4,
-        company="KPMG Saudi Arabia",
-        title="FinTech Internship",
-        city="Jeddah",
+        company="Tamara",
+        title="FinTech Product Internship",
+        city="Riyadh",
         work_mode="Hybrid",
         program_type="Internship",
-        major_fit=["FT", "CIS", "CS"],
-        source_url="https://home.kpmg/sa/en/home/careers.html",
-        score=0.0,
+        major_fit=["FT", "CIS", "CS", "DS"],
+        requirements="Product analytics, fintech, SQL, dashboards, business analysis",
+        skills_list=["fintech", "sql", "dashboards", "analytics", "business analysis"],
+        source_url="https://tamara.co/careers",
     ),
     Opportunity(
         id=5,
-        company="Thiqah Business Services",
-        title="Software Engineering COOP",
+        company="Mozn",
+        title="Machine Learning Internship",
         city="Riyadh",
-        work_mode="Remote",
-        program_type="COOP",
-        major_fit=["CS", "CE", "CIS"],
-        source_url="https://www.thiqah.sa/careers",
-        score=0.0,
+        work_mode="Hybrid",
+        program_type="Internship",
+        major_fit=["AI", "DS", "CS"],
+        requirements="Python, machine learning, NLP, model evaluation, data preprocessing",
+        skills_list=["python", "machine learning", "nlp", "model evaluation", "data preprocessing"],
+        source_url="https://mozn.sa/careers",
     ),
     Opportunity(
         id=6,
-        company="Madar",
-        title="Data Engineering Internship",
-        city="Dammam",
+        company="SDAIA",
+        title="Data Engineering Training",
+        city="Riyadh",
         work_mode="On-site",
-        program_type="Internship",
-        major_fit=["DE", "DS", "CS"],
-        source_url="https://www.madar.com/careers",
-        score=0.0,
+        program_type="Training",
+        major_fit=["DE", "DS", "AI", "CS"],
+        requirements="Data pipelines, ETL, SQL, Python, big data concepts",
+        skills_list=["data pipelines", "etl", "sql", "python", "big data"],
+        source_url="https://sdaia.gov.sa",
     ),
     Opportunity(
         id=7,
-        company="Siemens Saudi Arabia",
-        title="Computer Engineering COOP",
-        city="Jeddah",
+        company="Cyberani",
+        title="Cybersecurity COOP",
+        city="Riyadh",
         work_mode="On-site",
         program_type="COOP",
-        major_fit=["CE", "CS"],
-        source_url="https://www.siemens.com/sa/en/company/jobs.html",
-        score=0.0,
+        major_fit=["CYS", "CS", "CE"],
+        requirements="Cybersecurity fundamentals, network security, Linux, incident response",
+        skills_list=["cybersecurity", "network security", "linux", "incident response"],
+        source_url="https://cyberani.sa",
     ),
 ]
 
@@ -102,18 +115,282 @@ PLACEHOLDER_OPPORTUNITIES: List[Opportunity] = [
 # Public API
 # ---------------------------------------------------------------------------
 
+def _split_list_value(value) -> List[str]:
+    """
+    Convert a separated string into a clean list.
+
+    Supports commas and semicolons.
+
+    Examples:
+        "AI, DS, CS" -> ["AI", "DS", "CS"]
+        "python; sql; linux" -> ["python", "sql", "linux"]
+    """
+    if value is None:
+        return []
+
+    value = str(value).strip()
+
+    if not value or value.lower() == "nan":
+        return []
+
+    # Normalize semicolons to commas
+    value = value.replace(";", ",")
+
+    return [
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    ]
+
+
+def _get_first_available(row: dict, possible_keys: List[str], default: str = "") -> str:
+    """
+    Read the first existing value from an Excel row using multiple possible column names.
+
+    This helps us support different dataset column names like:
+        company / company_name / Company_Name
+        title / program_name / Program_Name
+    """
+    for key in possible_keys:
+        value = row.get(key)
+
+        if value is not None and str(value).strip() and str(value).lower() != "nan":
+            return str(value).strip()
+
+    return default
+
+def load_opportunities_from_xlsx(
+    xlsx_path: Path = OPPORTUNITIES_XLSX_PATH,
+) -> List[Opportunity]:
+    """
+    Load real opportunities from data/processed/opportunities_clean.xlsx.
+
+    If the Excel file does not exist, return an empty list.
+    The fallback to placeholders happens inside get_candidates().
+    """
+    if not xlsx_path.exists():
+        return []
+
+    # Try to read the Opportunities sheet first.
+    # If it does not exist, read the first sheet.
+    try:
+        df = pd.read_excel(xlsx_path, sheet_name="opportunities_clean")
+    except ValueError:
+        df = pd.read_excel(xlsx_path)
+
+    opportunities: List[Opportunity] = []
+
+    for index, row_data in df.iterrows():
+        row = row_data.to_dict()
+
+        opportunity_id_raw = _get_first_available(
+            row,
+            ["id", "opportunity_id", "Opportunity_ID"],
+            default=str(index + 1),
+        )
+
+        try:
+            opportunity_id = int(float(opportunity_id_raw))
+        except ValueError:
+            opportunity_id = index + 1
+
+        company = _get_first_available(
+            row,
+            ["company", "company_name", "Company", "Company_Name"],
+            default="Unknown Company",
+        )
+
+        title = _get_first_available(
+            row,
+            ["title", "program_name", "Program_Name", "opportunity_title", "Opportunity_Title"],
+            default="Untitled Opportunity",
+        )
+
+        city = _get_first_available(
+            row,
+            ["city", "City", "location", "Location"],
+            default="Not stated",
+        )
+
+        work_mode = _get_first_available(
+            row,
+            ["work_mode", "Work_Mode"],
+            default="Not stated",
+        )
+
+        program_type = _get_first_available(
+            row,
+            ["program_type", "Program_Type", "type", "Type"],
+            default="Not stated",
+        )
+
+        major_fit_raw = _get_first_available(
+            row,
+            ["major_fit", "degree_tags", "Degree_Tags"],
+            default="",
+        )
+
+        requirements = _get_first_available(
+            row,
+            ["requirements", "Requirements", "eligibility_summary", "Eligibility_Summary"],
+            default="",
+        )
+
+        skills_raw = _get_first_available(
+            row,
+            ["skills_list", "Skills_List", "technical_skills", "Technical_Skills"],
+            default="",
+        )
+
+        source_url = _get_first_available(
+            row,
+            ["source_url", "Source_URL", "application_url", "Application_URL"],
+            default="",
+        )
+
+        opportunities.append(
+            Opportunity(
+                id=opportunity_id,
+                company=company,
+                title=title,
+                city=city,
+                work_mode=work_mode,
+                program_type=program_type,
+                major_fit=_split_list_value(major_fit_raw),
+                requirements=requirements,
+                skills_list=_split_list_value(skills_raw),
+                source_url=source_url,
+            )
+        )
+
+    return opportunities
+
 def get_candidates() -> List[Opportunity]:
     """
     Return the full candidate opportunity pool.
 
-    Replace this function with a real database query when the dataset is ready.
+    First, try to load real opportunities from the cleaned Excel file.
+    If the Excel file does not exist or is empty, use placeholder opportunities.
     """
+    xlsx_opportunities = load_opportunities_from_xlsx()
+
+    if xlsx_opportunities:
+        return xlsx_opportunities
+
     return list(PLACEHOLDER_OPPORTUNITIES)
+
+def filter_candidates(
+    profile: ParsedProfile,
+    candidates: List[Opportunity],
+) -> List[Opportunity]:
+    """
+    Filter candidate opportunities before scoring.
+
+    This uses safe filtering:
+    - If a filter keeps some results, we apply it.
+    - If a filter would remove everything, we skip it.
+
+    This prevents the recommender from returning zero results too easily.
+    """
+    filtered = list(candidates)
+
+    # 1. Keep opportunities with a source URL.
+    # For now, source_url is our simple verification signal.
+    with_source = [opp for opp in filtered if opp.source_url]
+    if with_source:
+        filtered = with_source
+
+    # 2. Prefer opportunities that match the student's major.
+    if profile.major:
+        major_matches = [
+            opp for opp in filtered
+            if not opp.major_fit or profile.major in opp.major_fit
+        ]
+        if major_matches:
+            filtered = major_matches
+
+    # 3. Prefer opportunities that match the requested program type.
+    if profile.program_type:
+        program_matches = [
+            opp for opp in filtered
+            if opp.program_type.lower() == profile.program_type.lower()
+        ]
+        if program_matches:
+            filtered = program_matches
+
+    return filtered
+
+def build_recommendation_reasons(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+) -> tuple[List[str], List[str]]:
+    """
+    Build human-readable reasons explaining why an opportunity was recommended.
+
+    Args:
+        profile: Parsed student profile.
+        opportunity: Candidate opportunity.
+
+    Returns:
+        A tuple:
+        - List of explanation reasons.
+        - List of matched student skills.
+    """
+    reasons: List[str] = []
+
+    # 1. Major match
+    if profile.major and profile.major in opportunity.major_fit:
+        reasons.append(f"Matches your major: {profile.major}")
+
+    # 2. City match
+    if profile.city and profile.city.lower() == opportunity.city.lower():
+        reasons.append(f"Matches your preferred city: {profile.city}")
+
+    # 3. Work mode match
+    if profile.work_mode and profile.work_mode.lower() == opportunity.work_mode.lower():
+        reasons.append(f"Matches your preferred work mode: {profile.work_mode}")
+
+    # 4. Program type match
+    if profile.program_type and profile.program_type.lower() == opportunity.program_type.lower():
+        reasons.append(f"Matches your preferred program type: {profile.program_type}")
+
+    # 5. Interest match
+    if profile.interest and profile.interest.lower() in opportunity.title.lower():
+        reasons.append(f"Matches your interest in {profile.interest}")
+
+    # 6. Source URL / verification
+    if opportunity.source_url:
+        reasons.append("Has a verified source URL")
+
+    # 7. Skill matches
+    searchable_text = " ".join(
+        [
+            opportunity.title,
+            opportunity.requirements,
+            " ".join(opportunity.skills_list),
+        ]
+    ).lower()
+
+    skills_matched = [
+        skill for skill in profile.skills
+        if skill.lower() in searchable_text
+    ]
+
+    if skills_matched:
+        reasons.append(
+            "Matches your skills: " + ", ".join(skills_matched)
+        )
+
+    # Fallback reason if no specific reason was found
+    if not reasons:
+        reasons.append("Recommended based on overall profile similarity")
+
+    return reasons, skills_matched
 
 
 def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     """
-    Score and rank all candidate opportunities for the given student profile.
+    Filter, score, and rank candidate opportunities for the given student profile.
 
     Args:
         profile: Parsed student profile containing filters.
@@ -124,13 +401,31 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     """
     candidates = get_candidates()
 
+    # Step 1: filter weak candidates first
+    candidates = filter_candidates(profile, candidates)
+
+    # Step 2: score remaining candidates
     scored: List[Opportunity] = []
     for opp in candidates:
         score = compute_score(profile, opp)
-        # Create a new instance with the computed score
-        scored.append(opp.model_copy(update={"score": score}))
+        reasons, skills_matched = build_recommendation_reasons(profile, opp)
 
+    # Create a new instance with the computed score and explanation fields.
+        scored.append(
+            opp.model_copy(
+                update={
+                    "score": score,
+                    "why_recommended": reasons,
+                    "skills_matched": skills_matched,
+                }
+            )
+        )
+    
+
+    # Step 3: sort highest score first
     scored.sort(key=lambda o: o.score, reverse=True)
+
+    # Step 4: return Top N
     return scored[:top_n]
 
 
