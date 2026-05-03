@@ -295,3 +295,91 @@ def test_skills_match_score_no_student_skills():
     )
 
     assert skills_match_score(profile, opp) == 0.5
+
+def test_program_type_match_coop_with_mixed_type():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="COOP/Internship")
+
+    assert program_type_match_score(profile, opp) == 1.0
+
+
+def test_program_type_match_internship_with_mixed_type():
+    profile = make_profile(program_type="Internship")
+    opp = make_opportunity(program_type="COOP/Internship")
+
+    assert program_type_match_score(profile, opp) == 1.0
+
+
+def test_program_type_match_training_partial_match_for_coop():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="Training")
+
+    assert program_type_match_score(profile, opp) == 0.5
+
+
+def test_program_type_match_graduate_program_no_match_for_coop():
+    profile = make_profile(program_type="COOP")
+    opp = make_opportunity(program_type="Graduate Program")
+
+    assert program_type_match_score(profile, opp) == 0.0
+
+def test_work_mode_on_site_matches_in_person():
+    profile = make_profile(work_mode="On-site")
+    opp = make_opportunity(work_mode="In person")
+
+    assert work_mode_match_score(profile, opp) == 1.0
+
+
+def test_work_mode_on_site_matches_onsite():
+    profile = make_profile(work_mode="On-site")
+    opp = make_opportunity(work_mode="Onsite")
+
+    assert work_mode_match_score(profile, opp) == 1.0
+
+
+def test_work_mode_remote_matches_hybrid_partially():
+    profile = make_profile(work_mode="Remote")
+    opp = make_opportunity(work_mode="Hybrid")
+
+    assert work_mode_match_score(profile, opp) == 0.7
+
+
+def test_work_mode_hybrid_matches_remote_partially():
+    profile = make_profile(work_mode="Hybrid")
+    opp = make_opportunity(work_mode="Remote")
+
+    assert work_mode_match_score(profile, opp) == 0.7
+
+
+def test_work_mode_not_stated_gets_small_score():
+    profile = make_profile(work_mode="Remote")
+    opp = make_opportunity(work_mode="Not stated")
+
+    assert work_mode_match_score(profile, opp) == 0.3
+
+def test_city_match_same_eastern_province_cluster():
+    profile = make_profile(city="Dammam")
+    opp = make_opportunity(city="Dhahran")
+
+    assert city_match_score(profile, opp) == 0.7
+
+
+def test_city_match_flexible_saudi_arabia():
+    profile = make_profile(city="Jeddah")
+    opp = make_opportunity(city="Saudi Arabia")
+
+    assert city_match_score(profile, opp) == 0.5
+
+
+def test_city_match_flexible_multiple():
+    profile = make_profile(city="Riyadh")
+    opp = make_opportunity(city="Multiple")
+
+    assert city_match_score(profile, opp) == 0.5
+
+
+def test_city_match_not_stated_small_score():
+    profile = make_profile(city="Riyadh")
+    opp = make_opportunity(city="Not stated")
+
+    assert city_match_score(profile, opp) == 0.3

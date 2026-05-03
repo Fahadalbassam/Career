@@ -16,7 +16,7 @@ from app.parser import parse_message
 from app.schemas import Opportunity, ParsedProfile, RecommendResponse
 from app.scoring import compute_score
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OPPORTUNITIES_XLSX_PATH = REPO_ROOT / "data" / "processed" / "CareerFinder_Final_cleaned.xlsx"
+OPPORTUNITIES_XLSX_PATH = REPO_ROOT / "data" / "processed" / "Opportunities_Clean.xlsx"
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ def _split_list_value(value) -> List[str]:
     return [
         item.strip()
         for item in value.split(",")
-        if item.strip()
+        if item.strip() and item.strip().lower() not in {"not stated", "nan", "none", "n/a"}
     ]
 
 
@@ -421,12 +421,23 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
             )
         )
     
-
-    # Step 3: sort highest score first
+    # Step 3: sort by score (highest first)
     scored.sort(key=lambda o: o.score, reverse=True)
 
-    # Step 4: return Top N
-    return scored[:top_n]
+    # Step 4: return Top N with rank numbers
+    top_results = scored[:top_n]
+
+    ranked_results: List[Opportunity] = []
+    for rank, opp in enumerate(top_results, start=1):
+        ranked_results.append(
+            opp.model_copy(
+                update={
+                    "rank": rank,
+                }
+            )
+        )
+
+    return ranked_results
 
 
 def recommend_from_message(message: str, top_n: int = 5) -> RecommendResponse:

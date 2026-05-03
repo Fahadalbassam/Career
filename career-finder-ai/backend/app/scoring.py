@@ -35,40 +35,114 @@ def major_fit_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
 
 def city_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
     """
-    Return 1.0 when the student's preferred city matches the opportunity city,
-    0.5 for remote opportunities regardless of city preference, otherwise 0.0.
+    Return a score based on city/location match.
 
-    Args:
-        profile: Parsed student profile.
-        opportunity: Candidate opportunity.
-
-    Returns:
-        Float score in [0.0, 1.0].
+    Rules:
+        No student city preference -> 0.5
+        Exact city match -> 1.0
+        Same Eastern Province cluster -> 0.7
+        Remote opportunity -> 0.5
+        Saudi Arabia / Multiple / Remote city -> 0.5
+        Not stated -> 0.3
+        No match -> 0.0
     """
-    if opportunity.work_mode.lower() == "remote":
-        return 0.5
-    if profile.city and profile.city.lower() == opportunity.city.lower():
-        return 1.0
     if not profile.city:
-        return 0.5  # no preference expressed
+        return 0.5
+
+    student_city = profile.city.lower().strip()
+    opportunity_city = opportunity.city.lower().strip()
+    opportunity_work_mode = opportunity.work_mode.lower().strip()
+
+    if not opportunity_city or opportunity_city == "not stated":
+        return 0.3
+
+    if student_city == opportunity_city:
+        return 1.0
+
+    eastern_province = {"dammam", "khobar", "dhahran"}
+
+    if student_city in eastern_province and opportunity_city in eastern_province:
+        return 0.7
+
+    # If the opportunity is remote, the exact city is less important.
+    if "remote" in opportunity_work_mode:
+        return 0.5
+
+    flexible_locations = {"saudi arabia", "multiple", "remote"}
+
+    if opportunity_city in flexible_locations:
+        return 0.5
+
     return 0.0
+
+def _normalize_work_mode_for_scoring(value: str | None) -> str:
+    """
+    Normalize work mode values for scoring.
+
+    Examples:
+        "On-site" -> "onsite"
+        "Onsite" -> "onsite"
+        "In person" -> "onsite"
+        "In-person" -> "onsite"
+        "Remote" -> "remote"
+        "Hybrid" -> "hybrid"
+    """
+    if not value:
+        return ""
+
+    text = value.lower().strip()
+
+    if "remote" in text and "hybrid" in text:
+        return "hybrid"
+
+    if "hybrid" in text:
+        return "hybrid"
+
+    if "remote" in text:
+        return "remote"
+
+    if (
+        "on-site" in text
+        or "onsite" in text
+        or "in person" in text
+        or "in-person" in text
+    ):
+        return "onsite"
+
+    return text
 
 
 def work_mode_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
     """
-    Return 1.0 when work modes match exactly, 0.5 when either side is unknown.
+    Return a score based on how well the work mode matches.
 
-    Args:
-        profile: Parsed student profile.
-        opportunity: Candidate opportunity.
-
-    Returns:
-        Float score in [0.0, 1.0].
+    Rules:
+        No student preference -> 0.5
+        Exact normalized match -> 1.0
+        Student wants Remote and opportunity is Hybrid -> 0.7
+        Student wants Hybrid and opportunity is Remote -> 0.7
+        Opportunity work mode not stated -> 0.3
+        No match -> 0.0
     """
     if not profile.work_mode:
         return 0.5
-    if profile.work_mode.lower() == opportunity.work_mode.lower():
+
+    student_mode = _normalize_work_mode_for_scoring(profile.work_mode)
+    opportunity_mode = _normalize_work_mode_for_scoring(opportunity.work_mode)
+
+    if not opportunity_mode or opportunity_mode == "not stated":
+        return 0.3
+
+    if student_mode == opportunity_mode:
         return 1.0
+
+    # Remote and Hybrid are close, but not perfect
+    if student_mode == "remote" and opportunity_mode == "hybrid":
+        return 0.7
+
+    if student_mode == "hybrid" and opportunity_mode == "remote":
+        return 0.7
+
     return 0.0
 
 def program_type_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
@@ -76,23 +150,53 @@ def program_type_match_score(profile: ParsedProfile, opportunity: Opportunity) -
     Return a score based on how well the opportunity program type matches
     the student's requested program type.
 
-    Examples:
-        Student wants COOP + opportunity is COOP -> 1.0
-        Student wants COOP + opportunity is Internship -> 0.0
-        Student did not specify program type -> 0.5
-
-    Args:
-        profile: Parsed student profile.
-        opportunity: Candidate opportunity.
-
-    Returns:
-        Float score in [0.0, 1.0].
+    Rules:
+        Exact match -> 1.0
+        COOP/Internship matches COOP -> 1.0
+        COOP/Internship matches Internship -> 1.0
+        Training can partially match COOP/Internship -> 0.5
+        No student preference -> 0.5
+        No match -> 0.0
     """
     if not profile.program_type:
         return 0.5
 
-    if profile.program_type.lower() == opportunity.program_type.lower():
+    student_type = profile.program_type.lower().strip()
+    opportunity_type = opportunity.program_type.lower().strip()
+
+    if not opportunity_type:
+        return 0.0
+
+    # Exact match
+    if student_type == opportunity_type:
         return 1.0
+
+    # Normalize common mixed type
+    mixed_types = {
+        "coop/internship",
+        "internship/coop",
+        "coop internship",
+        "internship coop",
+    }
+
+    if opportunity_type in mixed_types:
+        if student_type in {"coop", "internship"}:
+            return 1.0
+
+    if student_type in mixed_types:
+        if opportunity_type in {"coop", "internship"}:
+            return 1.0
+
+    # COOP-related matching
+    if student_type == "coop" and "coop" in opportunity_type:
+        return 1.0
+
+    if student_type == "internship" and "intern" in opportunity_type:
+        return 1.0
+
+    # Training is somewhat related, but weaker
+    if student_type in {"coop", "internship"} and "training" in opportunity_type:
+        return 0.5
 
     return 0.0
 

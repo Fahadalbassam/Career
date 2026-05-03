@@ -4,6 +4,7 @@ test_recommender.py – Unit tests for the recommendation engine.
 
 import pytest
 import pandas as pd
+import app.recommender as recommender_module
 
 from app.recommender import (
     recommend,
@@ -13,7 +14,7 @@ from app.recommender import (
     load_opportunities_from_xlsx
 )
 from app.parser import parse_message
-from app.schemas import ParsedProfile
+from app.schemas import Opportunity, ParsedProfile
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +269,76 @@ def test_load_opportunities_from_xlsx(tmp_path):
     assert opportunities[0].program_type == "Internship"
     assert opportunities[0].major_fit == ["CYS", "CS"]
     assert opportunities[0].skills_list == ["linux", "network security"]
+
+def test_recommend_uses_xlsx_loaded_opportunities(monkeypatch):
+    fake_excel_opportunities = [
+        Opportunity(
+            id=101,
+            company="Test Data Company",
+            title="Data Science COOP",
+            city="Riyadh",
+            work_mode="Remote",
+            program_type="COOP",
+            major_fit=["DS", "AI", "CS"],
+            requirements="Python, SQL, data analysis",
+            skills_list=["python", "sql", "data analysis"],
+            source_url="https://example.com/data-coop",
+        ),
+        Opportunity(
+            id=102,
+            company="Test Cyber Company",
+            title="Cybersecurity Internship",
+            city="Jeddah",
+            work_mode="On-site",
+            program_type="Internship",
+            major_fit=["CYS"],
+            requirements="Network security and Linux",
+            skills_list=["network security", "linux"],
+            source_url="https://example.com/cyber-internship",
+        ),
+    ]
+
+    def fake_loader():
+        return fake_excel_opportunities
+
+    monkeypatch.setattr(
+        recommender_module,
+        "load_opportunities_from_xlsx",
+        fake_loader,
+    )
+
+    profile = ParsedProfile(
+        major="DS",
+        city="Riyadh",
+        interest="Data Science",
+        work_mode="Remote",
+        program_type="COOP",
+        skills=["python", "sql"],
+    )
+
+    results = recommender_module.recommend(profile, top_n=5)
+
+    assert len(results) > 0
+    assert results[0].company == "Test Data Company"
+    assert results[0].title == "Data Science COOP"
+    assert results[0].score > 0.8
+    assert "python" in results[0].skills_matched
+    assert "sql" in results[0].skills_matched
+
+
+def test_recommendations_include_rank_numbers():
+    profile = ParsedProfile(
+        major="CYS",
+        city="Riyadh",
+        interest="Cybersecurity",
+        work_mode="Hybrid",
+        program_type="Internship",
+        skills=["linux", "network security"],
+    )
+
+    results = recommend(profile, top_n=5)
+
+    assert len(results) > 0
+
+    for index, opp in enumerate(results, start=1):
+        assert opp.rank == index

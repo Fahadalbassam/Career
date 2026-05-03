@@ -86,8 +86,9 @@ class ParsedProfile(StudentProfile):
 
 class Opportunity(BaseModel):
     """A single COOP/internship opportunity."""
-
+    
     id: int
+    rank: int = 0
     company: str
     title: str
     city: str
