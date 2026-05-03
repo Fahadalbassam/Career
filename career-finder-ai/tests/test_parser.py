@@ -145,3 +145,27 @@ def test_parse_empty_fields_when_unknown():
 def test_parse_interest_derived_from_major():
     profile = parse_message("data science student in Riyadh")
     assert profile.interest == "Data Science"
+
+def test_parse_cyber_security_with_space():
+    profile = parse_message("I study cyber security")
+    assert profile.major == "CYS"
+
+
+def test_parse_co_op_with_dash():
+    profile = parse_message("I am looking for a co-op")
+    assert profile.program_type == "COOP"
+
+
+def test_parse_co_op_with_space():
+    profile = parse_message("I am looking for a co op")
+    assert profile.program_type == "COOP"
+
+
+def test_parse_work_from_home_as_remote():
+    profile = parse_message("I prefer work from home")
+    assert profile.work_mode == "Remote"
+
+
+def test_parse_scikit_learn_skill_without_dash():
+    profile = parse_message("I know scikit learn")
+    assert "scikit-learn" in profile.skills
