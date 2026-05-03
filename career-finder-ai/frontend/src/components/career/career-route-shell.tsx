@@ -58,16 +58,16 @@ const CHAT_KEYBOARD_CAPTION_BOTTOM_CSS =
 
 const springOpen: FMTransition = {
   type: "spring",
-  stiffness: 420,
-  damping: 40,
-  mass: 0.85,
+  stiffness: 560,
+  damping: 46,
+  mass: 0.78,
 }
 
 const springSnap: FMTransition = {
   type: "spring",
-  stiffness: 520,
-  damping: 44,
-  mass: 0.82,
+  stiffness: 680,
+  damping: 52,
+  mass: 0.74,
 }
 
 type DockOverride = "header" | "footer"
@@ -249,7 +249,7 @@ export function CareerRouteShell({
         animDoneRef.current = null
 
         resolver?.()
-      }, 1100)
+      }, 750)
     })
 
   const goChatToSearch = useCallback(async () => {
@@ -262,9 +262,9 @@ export function CareerRouteShell({
 
     setDockOverride("header")
 
-    await composerMovement
+    queueMicrotask(() => setSnapSearchComposer(true))
 
-    setSnapSearchComposer(true)
+    await composerMovement
 
     routerRef.current.push("/search")
   }, [prefersReducedMotion])

@@ -298,3 +298,299 @@
 [data-shelf-tilt-root] {
   transform-style: preserve-3d;
 }
+
+/* --- Methodology page: scroll-driven planet (see methodology-hero-planet.tsx) --- */
+.methodology-planet-root {
+  --planet-y: 0px;
+  --ring-one-rotate: 0deg;
+  --ring-two-rotate: 0deg;
+  --ring-three-rotate: 0deg;
+  --ring-four-rotate: 0deg;
+  --ring-five-rotate: 0deg;
+  --ring-one-y: 0px;
+  --ring-two-y: 0px;
+  --ring-three-y: 0px;
+  --ring-four-y: 0px;
+  --ring-five-y: 0px;
+  --dot-rotate: 0deg;
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  aspect-ratio: 1;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.methodology-planet-dotted-bg {
+  pointer-events: none;
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  opacity: 0.45;
+  background-image: radial-gradient(oklch(0.45 0 0 / 0.14) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+.methodology-planet-deco {
+  pointer-events: none;
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid oklch(0.45 0 0 / 0.08);
+}
+
+.methodology-planet-deco--a {
+  width: 118%;
+  height: 118%;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  opacity: 0.35;
+}
+
+.methodology-planet-deco--b {
+  width: 72%;
+  height: 72%;
+  left: 8%;
+  top: 14%;
+  opacity: 0.22;
+}
+
+.methodology-planet-stage {
+  position: absolute;
+  inset: 10% 6% 14% 6%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+.methodology-planet-shift {
+  position: relative;
+  width: min(72%, 200px);
+  aspect-ratio: 1;
+  transform: translate3d(0, var(--planet-y), 0);
+  will-change: transform;
+}
+
+.methodology-planet-shadow {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: 72%;
+  height: 12%;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: oklch(0.2 0 0 / 0.22);
+  filter: blur(16px);
+}
+
+.methodology-planet-sphere {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 28%, oklch(0.42 0 0) 0%, oklch(0.18 0 0) 42%, oklch(0.12 0 0) 100%);
+  box-shadow:
+    0 22px 42px -14px oklch(0.15 0 0 / 0.75),
+    0 10px 20px -8px oklch(0.2 0 0 / 0.55),
+    inset -14px -18px 28px oklch(0.05 0 0 / 0.82),
+    inset 8px 10px 20px oklch(1 0 0 / 0.07);
+}
+
+.methodology-planet-ring {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 132%;
+  height: 44%;
+  border-radius: 50%;
+  border: 1px solid oklch(0.4 0 0 / 0.16);
+  transform-origin: 50% 50%;
+  z-index: 2;
+}
+
+.dark .methodology-planet-ring {
+  border-color: oklch(1 0 0 / 0.12);
+}
+
+.methodology-planet-ring--one {
+  transform: translate3d(-50%, -50%, 0) rotateX(68deg) translate3d(0, var(--ring-one-y), 0)
+    rotate(var(--ring-one-rotate));
+  will-change: transform;
+}
+
+.methodology-planet-ring--two {
+  z-index: 1;
+  width: 154%;
+  height: 52%;
+  opacity: 0.55;
+  border-color: oklch(0.55 0 0 / 0.11);
+  transform: translate3d(-50%, -50%, 0) rotateX(72deg) translate3d(0, var(--ring-two-y), 0)
+    rotate(var(--ring-two-rotate));
+  will-change: transform;
+}
+
+.methodology-planet-ring--three {
+  z-index: 1;
+  width: 172%;
+  height: 58%;
+  opacity: 0.4;
+  border-color: oklch(0.48 0 0 / 0.11);
+  transform: translate3d(-50%, -50%, 0) rotateX(63deg) translate3d(0, var(--ring-three-y), 0)
+    rotate(var(--ring-three-rotate));
+  will-change: transform;
+}
+
+.methodology-planet-ring--four {
+  z-index: 1;
+  width: 138%;
+  height: 38%;
+  opacity: 0.36;
+  border-color: oklch(0.45 0 0 / 0.1);
+  transform: translate3d(-50%, -50%, 0) rotateX(78deg) translate3d(0, var(--ring-four-y), 0)
+    rotate(var(--ring-four-rotate));
+  will-change: transform;
+}
+
+.methodology-planet-ring--five {
+  z-index: 2;
+  width: 118%;
+  height: 62%;
+  opacity: 0.26;
+  border-style: dashed;
+  border-color: oklch(0.5 0 0 / 0.14);
+  transform: translate3d(-50%, -50%, 0) rotateX(69deg) translate3d(0, var(--ring-five-y), 0)
+    rotate(var(--ring-five-rotate));
+  will-change: transform;
+}
+
+.methodology-planet-orbit-dots {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 118%;
+  height: 118%;
+  translate: -50% -50%;
+  transform: rotate(var(--dot-rotate));
+  transform-origin: 50% 50%;
+  z-index: 4;
+  will-change: transform;
+}
+
+.methodology-planet-orbit-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: oklch(0.35 0 0);
+  box-shadow: 0 0 0 1px oklch(1 0 0 / 0.35);
+  top: 50%;
+  left: 50%;
+  margin: -3px 0 0 -3px;
+}
+
+.dark .methodology-planet-orbit-dot {
+  background: oklch(0.85 0 0);
+  box-shadow: 0 0 0 1px oklch(0.2 0 0 / 0.6);
+}
+
+.methodology-planet-orbit-dot--a {
+  transform: rotate(18deg) translate3d(0, -108px, 0);
+}
+.methodology-planet-orbit-dot--b {
+  transform: rotate(118deg) translate3d(0, -124px, 0);
+}
+.methodology-planet-orbit-dot--c {
+  transform: rotate(230deg) translate3d(0, -96px, 0);
+}
+
+@media (max-width: 1023px) {
+  .methodology-planet-orbit-dot--a {
+    transform: rotate(18deg) translate3d(0, -86px, 0);
+  }
+  .methodology-planet-orbit-dot--b {
+    transform: rotate(118deg) translate3d(0, -98px, 0);
+  }
+  .methodology-planet-orbit-dot--c {
+    transform: rotate(230deg) translate3d(0, -78px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .methodology-planet-shift,
+  .methodology-planet-ring--one,
+  .methodology-planet-ring--two,
+  .methodology-planet-ring--three,
+  .methodology-planet-ring--four,
+  .methodology-planet-ring--five,
+  .methodology-planet-orbit-dots {
+    will-change: auto;
+  }
+}
+
+
+.methodology-page-dot-patch {
+  pointer-events: none;
+  background-image: radial-gradient(oklch(0.45 0 0 / 0.11) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+
+/* Methodology pipeline connectors */
+.methodology-pipeline-connector-line--vertical {
+  width: 1px;
+  height: 2.5rem;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    oklch(0.65 0 0 / 0.35),
+    transparent
+  );
+}
+
+.methodology-pipeline-connector-node--vertical {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  margin-top: -4px;
+  margin-bottom: 4px;
+  background: oklch(0.25 0 0);
+  box-shadow: 0 0 0 3px oklch(0.97 0 0 / 0.9);
+}
+
+.dark .methodology-pipeline-connector-node--vertical {
+  background: oklch(0.88 0 0);
+  box-shadow: 0 0 0 3px oklch(0.18 0 0 / 0.9);
+}
+
+.methodology-pipeline-connector-line--horizontal {
+  height: 1px;
+  width: 2rem;
+  flex: 1 1 auto;
+  min-width: 1.25rem;
+  max-width: 3rem;
+  background: linear-gradient(
+    to right,
+    oklch(0.65 0 0 / 0.2),
+    oklch(0.55 0 0 / 0.45),
+    oklch(0.65 0 0 / 0.2)
+  );
+}
+
+.methodology-pipeline-connector-arrow {
+  width: 0;
+  height: 0;
+  margin-left: -2px;
+  border-width: 4px 0 4px 6px;
+  border-style: solid;
+  border-color: transparent transparent transparent oklch(0.45 0 0 / 0.55);
+}
+
+.dark .methodology-pipeline-connector-arrow {
+  border-color: transparent transparent transparent oklch(0.72 0 0 / 0.65);
+}

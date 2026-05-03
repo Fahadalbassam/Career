@@ -15,8 +15,6 @@ const navItems = [
   { href: "/", label: "Home" },
   { href: "/chat", label: "Chat" },
   { href: "/search", label: "Search" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/model", label: "Model" },
   { href: "/methodology", label: "Methodology" },
 ] as const
 

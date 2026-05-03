@@ -152,7 +152,9 @@ export function CareerChat() {
   }, [newestShelfMemoryId, setNewestShelfMemoryId])
 
   useEffect(() => {
-    setCleanSlatePortalReady(true)
+    queueMicrotask(() => {
+      setCleanSlatePortalReady(true)
+    })
   }, [])
 
   useEffect(() => {
@@ -297,7 +299,7 @@ export function CareerChat() {
           : e,
       ),
     )
-  }, [])
+  }, [setNewestShelfMemoryId, setSavedShelfMemoriesOldestFirst])
 
   const onKeepRefining = useCallback((entryId: string) => {
     finalizeGateOpen.current = false

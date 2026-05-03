@@ -223,12 +223,13 @@ export function FitShelfWidget({
                 <p className="line-clamp-2 min-h-0 text-[11px] text-white/90 sm:text-xs">
                   {reason}
                 </p>
-                <div className="mt-auto flex min-h-0 flex-wrap gap-1 pr-0.5">
+                <div className="mt-auto flex min-h-0 flex-nowrap gap-1 overflow-hidden pr-0.5">
                   {tagRow.map((tag) => (
                     <Badge
                       key={tag}
                       variant="outline"
-                      className="!border-white/25 !bg-transparent px-1.5 py-0.5 !text-[10px] !font-extrabold leading-none !text-white sm:!text-[11px]"
+                      title={tag}
+                      className="min-w-0 max-w-[34%] shrink !border-white/25 !bg-transparent truncate px-1.5 py-0.5 !text-[10px] !font-extrabold leading-none !text-white sm:!text-[11px]"
                     >
                       {tag}
                     </Badge>
@@ -262,15 +263,16 @@ export function FitShelfWidget({
                 {Math.min(100, Math.max(0, Math.round(confidence)))}% match
               </span>
             </div>
-            <p className="mt-2 min-h-0 flex-1 overflow-y-auto text-[10px] font-semibold leading-relaxed tracking-tight text-black [overflow-wrap:anywhere] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mt-3 sm:text-[11px]">
+            <p className="mt-2 min-h-0 flex-1 basis-0 overflow-y-auto text-[10px] font-semibold leading-relaxed tracking-tight text-black [overflow-wrap:anywhere] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mt-3 sm:text-[11px]">
               {details}
             </p>
             {tags.length > 0 ? (
-              <div className="mt-2 flex min-h-0 flex-wrap gap-1 border-t border-black/10 pt-2 sm:mt-3 sm:gap-1.5 sm:pt-2.5">
+              <div className="mt-2 flex shrink-0 flex-nowrap gap-1 overflow-hidden border-t border-black/10 pt-2 sm:mt-2 sm:gap-1 sm:pt-2">
                 {tags.slice(0, 3).map((tag) => (
                   <span
                     key={tag}
-                    className="rounded border border-black px-1 py-0.5 text-[9px] font-extrabold leading-none text-black sm:text-[10px]"
+                    title={tag}
+                    className="min-w-0 flex-1 truncate rounded border border-black px-1 py-0.5 text-center text-[9px] font-extrabold leading-none text-black sm:text-[10px]"
                   >
                     {tag}
                   </span>
