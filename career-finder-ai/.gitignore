@@ -2,6 +2,9 @@
 # Career Finder AI – .gitignore
 # =============================================================================
 
+# Local agent instructions (not shared in repo)
+AGENTS.md
+
 # Python virtual environments
 .venv/
 venv/
