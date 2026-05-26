@@ -1,0 +1,4 @@
+mae,rmse,r2,precision_at_5,avg_actual_top5,avg_predicted_top5,model_name,feature_strategy,train_rows,test_rows,split_method,rubric_features_used
+8.987946501624837,10.610394100401917,-0.05574745964237482,0.08,53.7672,64.20964938971572,text_only_ridge,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False
+7.200647700079238,8.735102672118211,0.2844614395965338,0.1,60.3274,63.052998692230894,text_only_random_forest,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False
+5.111492639247203,6.387023609919025,0.6174448455519489,0.12,59.084,60.81371285524267,text_only_gradient_boosting,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False

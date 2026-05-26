@@ -136,10 +136,15 @@ def test_parse_full_message():
 def test_parse_empty_fields_when_unknown():
     profile = parse_message("I want a job")
     assert profile.major is None
+    assert profile.university is None
     assert profile.city is None
+    assert profile.preferred_locations == []
     assert profile.work_mode is None
     assert profile.program_type is None
     assert profile.skills == []
+    assert profile.qualifications == []
+    assert profile.preferred_roles == []
+    assert profile.interview_preference is None
 
 
 def test_parse_interest_derived_from_major():
@@ -169,3 +174,154 @@ def test_parse_work_from_home_as_remote():
 def test_parse_scikit_learn_skill_without_dash():
     profile = parse_message("I know scikit learn")
     assert "scikit-learn" in profile.skills
+
+
+# ---------------------------------------------------------------------------
+# University detection
+# ---------------------------------------------------------------------------
+
+def test_parse_university_iau_abbreviation():
+    profile = parse_message("I am a CS student at IAU looking for COOP")
+    assert profile.university == "IAU"
+
+
+def test_parse_university_iau_full_name():
+    profile = parse_message(
+        "I study at Imam Abdulrahman Bin Faisal University in Dammam"
+    )
+    assert profile.university == "IAU"
+
+
+def test_parse_university_kfupm():
+    profile = parse_message("KFUPM student seeking internship")
+    assert profile.university == "KFUPM"
+
+
+def test_parse_university_ksu():
+    profile = parse_message("King Saud University student in Riyadh")
+    assert profile.university == "KSU"
+
+
+def test_parse_university_kau():
+    profile = parse_message("I attend King Abdulaziz University")
+    assert profile.university == "KAU"
+
+
+def test_parse_university_psu():
+    profile = parse_message("Prince Sultan University graduate")
+    assert profile.university == "PSU"
+
+
+# ---------------------------------------------------------------------------
+# Preferred locations
+# ---------------------------------------------------------------------------
+
+def test_parse_preferred_locations_or():
+    profile = parse_message("Looking for COOP in Riyadh or Dammam")
+    assert profile.city == "Riyadh"
+    assert profile.preferred_locations == ["Riyadh", "Dammam"]
+
+
+def test_parse_preferred_locations_and():
+    profile = parse_message("Open to internships in Riyadh and Jeddah")
+    assert profile.city == "Riyadh"
+    assert profile.preferred_locations == ["Riyadh", "Jeddah"]
+
+
+def test_parse_single_city_keeps_preferred_locations_empty():
+    profile = parse_message("I want an internship in Riyadh")
+    assert profile.city == "Riyadh"
+    assert profile.preferred_locations == []
+
+
+# ---------------------------------------------------------------------------
+# Qualifications detection
+# ---------------------------------------------------------------------------
+
+def test_parse_qualification_aws():
+    profile = parse_message("I have AWS and python skills")
+    assert "AWS" in profile.qualifications
+    assert "aws" not in profile.skills
+
+
+def test_parse_qualification_ccna_and_security_plus():
+    profile = parse_message("Certified in CCNA and Security+")
+    assert "CCNA" in profile.qualifications
+    assert "Security+" in profile.qualifications
+
+
+def test_parse_qualification_gpa():
+    profile = parse_message("My GPA is 4.2 and I know SQL")
+    assert any(q.startswith("GPA 4.2") for q in profile.qualifications)
+
+
+def test_parse_qualification_gpa_compact_form():
+    profile = parse_message("GPA 4.5 student with python")
+    assert "GPA 4.5" in profile.qualifications
+
+
+# ---------------------------------------------------------------------------
+# Preferred roles
+# ---------------------------------------------------------------------------
+
+def test_parse_preferred_role_software_engineer():
+    profile = parse_message("I want a software engineering COOP")
+    assert "Software Engineer" in profile.preferred_roles
+
+
+def test_parse_preferred_role_data_scientist():
+    profile = parse_message("Looking for data scientist internship")
+    assert "Data Scientist" in profile.preferred_roles
+
+
+def test_parse_preferred_role_soc_analyst():
+    profile = parse_message("Interested in SOC analyst roles")
+    assert "SOC Analyst" in profile.preferred_roles
+
+
+# ---------------------------------------------------------------------------
+# Interview preference
+# ---------------------------------------------------------------------------
+
+def test_parse_interview_preference_no_interview():
+    profile = parse_message("I prefer COOP without interview")
+    assert profile.interview_preference == "No interview preferred"
+
+
+def test_parse_interview_preference_no_interview_direct_acceptance():
+    profile = parse_message("Looking for direct acceptance opportunities")
+    assert profile.interview_preference == "No interview preferred"
+
+
+def test_parse_interview_preference_okay():
+    profile = parse_message("Interview is okay for me")
+    assert profile.interview_preference == "Interview okay"
+
+
+def test_parse_interview_preference_not_mentioned():
+    profile = parse_message("remote internship in Riyadh")
+    assert profile.interview_preference is None
+
+
+# ---------------------------------------------------------------------------
+# Combined extended profile
+# ---------------------------------------------------------------------------
+
+def test_parse_combined_extended_profile():
+    profile = parse_message(
+        "I am a CS student at IAU with Python, SQL, AWS and GPA 4.5. "
+        "I want a remote COOP in Riyadh or Dammam for software engineering "
+        "without interview."
+    )
+    assert profile.major == "CS"
+    assert profile.university == "IAU"
+    assert "python" in profile.skills
+    assert "sql" in profile.skills
+    assert "AWS" in profile.qualifications
+    assert "GPA 4.5" in profile.qualifications
+    assert profile.work_mode == "Remote"
+    assert profile.program_type == "COOP"
+    assert profile.city == "Riyadh"
+    assert profile.preferred_locations == ["Riyadh", "Dammam"]
+    assert "Software Engineer" in profile.preferred_roles
+    assert profile.interview_preference == "No interview preferred"

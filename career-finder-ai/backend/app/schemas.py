@@ -40,8 +40,8 @@ class StudentProfile(BaseModel):
     """
     Structured student profile used by the recommendation engine.
 
-    This represents the student's major, location, interests, preferred work mode,
-    preferred program type, and skills.
+    Represents major, university, locations, skills, qualifications, interests,
+    work/program preferences, role intent, and interview preference.
     """
 
     major: Optional[str] = Field(
@@ -49,9 +49,29 @@ class StudentProfile(BaseModel):
         description="Student major code, e.g. CS, AI, CYS, CIS, DS, DE, CE, FT.",
     )
 
+    university: Optional[str] = Field(
+        default=None,
+        description="University code or name, e.g. IAU, KFUPM, KSU, KAU, PSU.",
+    )
+
     city: Optional[str] = Field(
         default=None,
-        description="Preferred city, e.g. Riyadh, Jeddah, Dammam, Khobar, Dhahran.",
+        description="Primary city, e.g. Riyadh, Jeddah, Dammam, Khobar, Dhahran.",
+    )
+
+    preferred_locations: List[str] = Field(
+        default_factory=list,
+        description="Acceptable cities when multiple locations are mentioned.",
+    )
+
+    skills: List[str] = Field(
+        default_factory=list,
+        description="Student skills, e.g. Python, SQL, Linux.",
+    )
+
+    qualifications: List[str] = Field(
+        default_factory=list,
+        description="Certifications, credentials, or GPA tokens, e.g. AWS, GPA 4.5.",
     )
 
     interest: Optional[str] = Field(
@@ -59,29 +79,29 @@ class StudentProfile(BaseModel):
         description="Student interest area, e.g. Cybersecurity, Data Science, Software Development.",
     )
 
-    work_mode: Optional[str] = Field(
-        default=None,
-        description="Preferred work mode, e.g. Remote, On-site, Hybrid.",
-    )
-
     program_type: Optional[str] = Field(
         default=None,
         description="Preferred opportunity type, e.g. COOP or Internship.",
     )
 
-    skills: List[str] = Field(
+    work_mode: Optional[str] = Field(
+        default=None,
+        description="Preferred work mode, e.g. Remote, On-site, Hybrid.",
+    )
+
+    preferred_roles: List[str] = Field(
         default_factory=list,
-        description="Student skills, e.g. Python, SQL, Linux, Power BI.",
+        description="Role titles or clusters the student is targeting.",
+    )
+
+    interview_preference: Optional[str] = Field(
+        default=None,
+        description='Interview stance, e.g. "No interview preferred" or "Interview okay".',
     )
 
 
 class ParsedProfile(StudentProfile):
-    """
-    Backward-compatible name used by the parser and API.
-
-    For now, ParsedProfile and StudentProfile have the same fields.
-    Later, the parser will return ParsedProfile after reading a student message.
-    """
+    """Structured profile returned by the parser and /parse, /recommend APIs."""
     pass
 
 class Opportunity(BaseModel):
