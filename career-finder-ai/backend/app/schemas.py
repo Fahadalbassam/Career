@@ -2,7 +2,7 @@
 schemas.py – Pydantic models for request and response validation.
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -121,7 +121,46 @@ class Opportunity(BaseModel):
     skills_list: List[str] = Field(default_factory=list)
 
     source_url: str
-    score: float = Field(0.0, ge=0.0, le=1.0, description="Composite fit score.")
+    score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Legacy composite fit score in [0, 1]. Equals match_score / 100.",
+    )
+    match_score: int = Field(
+        0,
+        ge=0,
+        le=100,
+        description="0–100 recommendation score derived from the rubric.",
+    )
+
+    role_cluster: str = Field(
+        default="",
+        description=(
+            "Inferred role cluster, e.g. Software Engineering, Cybersecurity, "
+            "Data Science, Cloud Engineering."
+        ),
+    )
+
+    interview_required: str = Field(
+        default="Not stated",
+        description='One of: "Required", "Not required", "Not stated".',
+    )
+
+    missing_skills: List[str] = Field(
+        default_factory=list,
+        description="Opportunity skills the student does not appear to have.",
+    )
+
+    score_breakdown: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-component rubric scores in [0, 1] used to derive match_score. "
+            "Keys: major_fit_score, skill_match_score, role_interest_score, "
+            "city_match_score, program_type_score, work_mode_score, "
+            "verification_score, interview_score."
+        ),
+    )
 
     # Explanation fields returned to the frontend
     why_recommended: List[str] = Field(default_factory=list)

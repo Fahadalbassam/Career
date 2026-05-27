@@ -13,8 +13,15 @@ from typing import List
 import pandas as pd
 
 from app.parser import parse_message
+from app.rubric import (
+    SCORE_BREAKDOWN_KEYS,
+    compute_missing_skills,
+    infer_interview_required,
+    infer_role_cluster,
+    score_profile_opportunity_pair,
+)
 from app.schemas import Opportunity, ParsedProfile, RecommendResponse
-from app.scoring import compute_score
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OPPORTUNITIES_XLSX_PATH = REPO_ROOT / "data" / "processed" / "Opportunities_Clean.xlsx"
 
@@ -392,6 +399,16 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     """
     Filter, score, and rank candidate opportunities for the given student profile.
 
+    Each returned opportunity is enriched with rubric outputs:
+        - ``match_score``: 0–100 recommendation score.
+        - ``score``: legacy 0–1 score = ``match_score / 100`` (kept for backward
+          compatibility).
+        - ``score_breakdown``: per-component rubric scores in [0, 1].
+        - ``role_cluster``: inferred role/category for the opportunity.
+        - ``interview_required``: inferred from opportunity text.
+        - ``missing_skills``: opportunity skills the student does not list.
+        - ``why_recommended`` / ``skills_matched``: human-readable reasons.
+
     Args:
         profile: Parsed student profile containing filters.
         top_n: Maximum number of recommendations to return.
@@ -404,25 +421,38 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     # Step 1: filter weak candidates first
     candidates = filter_candidates(profile, candidates)
 
-    # Step 2: score remaining candidates
+    # Step 2: score remaining candidates with the shared rubric
     scored: List[Opportunity] = []
     for opp in candidates:
-        score = compute_score(profile, opp)
+        rubric = score_profile_opportunity_pair(profile, opp)
+        raw_target = float(rubric.pop("target_score"))
+
+        match_score = int(round(max(0.0, min(100.0, raw_target))))
+        legacy_score = round(match_score / 100.0, 4)
+
+        score_breakdown = {
+            key: round(float(rubric[key]), 4) for key in SCORE_BREAKDOWN_KEYS
+        }
+
         reasons, skills_matched = build_recommendation_reasons(profile, opp)
 
-    # Create a new instance with the computed score and explanation fields.
         scored.append(
             opp.model_copy(
                 update={
-                    "score": score,
+                    "score": legacy_score,
+                    "match_score": match_score,
+                    "score_breakdown": score_breakdown,
+                    "role_cluster": infer_role_cluster(opp),
+                    "interview_required": infer_interview_required(opp),
+                    "missing_skills": compute_missing_skills(profile, opp),
                     "why_recommended": reasons,
                     "skills_matched": skills_matched,
                 }
             )
         )
-    
-    # Step 3: sort by score (highest first)
-    scored.sort(key=lambda o: o.score, reverse=True)
+
+    # Step 3: sort by match_score (highest first); legacy score is monotone with it
+    scored.sort(key=lambda o: o.match_score, reverse=True)
 
     # Step 4: return Top N with rank numbers
     top_results = scored[:top_n]

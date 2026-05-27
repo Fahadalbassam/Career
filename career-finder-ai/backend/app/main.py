@@ -1,11 +1,12 @@
 """
 main.py – FastAPI application entry point.
 
-Run with:
-    uvicorn app.main:app --reload
+Run with (from the backend directory):
+    python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import APP_ENV
 from app.recommender import recommend_from_message
@@ -26,6 +27,17 @@ app = FastAPI(
         "Helps computing students find suitable opportunities based on their profile."
     ),
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
