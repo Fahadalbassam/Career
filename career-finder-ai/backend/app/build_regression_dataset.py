@@ -18,6 +18,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import pandas as pd
 
+from app.opportunity_enrichment import enrich_opportunity_signals
 from app.recommender import (
     OPPORTUNITIES_XLSX_PATH,
     get_candidates,
@@ -66,6 +67,7 @@ __all__ = [
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 OUTPUT_FILE = PROCESSED_DIR / "student_opportunity_regression_dataset.csv"
+OPPORTUNITIES_ENRICHED_CSV_PATH = PROCESSED_DIR / "Opportunities_Enriched.csv"
 
 CSV_COLUMNS: List[str] = [
     "profile_id",
@@ -93,6 +95,12 @@ CSV_COLUMNS: List[str] = [
     "interview_required",
     "source_url",
     "verified_opportunity",
+    # ML-2C: enriched opportunity signal columns
+    "opportunity_inferred_role_cluster",
+    "opportunity_inferred_interests",
+    "opportunity_inferred_skills",
+    "opportunity_required_skills",
+    "opportunity_preferred_skills",
     "major_fit_score",
     "skill_match_score",
     "role_interest_score",
@@ -111,6 +119,71 @@ CSV_COLUMNS: List[str] = [
 
 def _join_list(values: Sequence[str]) -> str:
     return "; ".join(values)
+
+
+def _join_any(values: object) -> str:
+    """Join a list or return a string as-is."""
+    if isinstance(values, list):
+        return "; ".join(str(v) for v in values if v)
+    return str(values) if values else ""
+
+
+# ---------------------------------------------------------------------------
+# Enriched CSV loader  (ML-2C)
+# ---------------------------------------------------------------------------
+
+def load_opportunities_from_enriched_csv(
+    csv_path: Path = OPPORTUNITIES_ENRICHED_CSV_PATH,
+) -> List[Opportunity]:
+    """Load opportunities from Opportunities_Enriched.csv.
+
+    Returns an empty list when the file does not exist.  The caller is
+    responsible for falling back to the xlsx when this returns empty.
+    """
+    if not csv_path.exists():
+        return []
+
+    df = pd.read_csv(csv_path)
+    opportunities: List[Opportunity] = []
+
+    for index, row_data in df.iterrows():
+        row = row_data.where(pd.notna(row_data), other=None).to_dict()
+
+        def _get(keys: List[str], default: str = "") -> str:
+            for k in keys:
+                v = row.get(k)
+                if v is not None and str(v).strip() and str(v).lower() not in {"nan", "none"}:
+                    return str(v).strip()
+            return default
+
+        def _split(raw: str) -> List[str]:
+            if not raw or str(raw).lower() in {"nan", "none"}:
+                return []
+            raw = raw.replace(";", ",")
+            return [x.strip() for x in raw.split(",") if x.strip()]
+
+        opp_id_raw = _get(["id", "opportunity_id"], default=str(index + 1))
+        try:
+            opp_id = int(float(opp_id_raw))
+        except (ValueError, TypeError):
+            opp_id = index + 1
+
+        opportunities.append(
+            Opportunity(
+                id=opp_id,
+                company=_get(["company", "company_name"], default="Unknown Company"),
+                title=_get(["title", "program_name"], default="Untitled"),
+                city=_get(["city"], default="Not stated"),
+                work_mode=_get(["work_mode"], default="Not stated"),
+                program_type=_get(["program_type"], default="Not stated"),
+                major_fit=_split(_get(["major_fit", "degree_tags"], default="")),
+                requirements=_get(["requirements"], default=""),
+                skills_list=_split(_get(["skills_list", "technical_skills"], default="")),
+                source_url=_get(["source_url", "application_url"], default=""),
+            )
+        )
+
+    return opportunities
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +761,9 @@ def build_regression_rows(
             interview_required = infer_interview_required(opportunity)
             verified = infer_verified_opportunity(opportunity)
 
+            # ML-2C: enrich opportunity signals for dataset metadata
+            signals = enrich_opportunity_signals(opportunity)
+
             rows.append(
                 {
                     "profile_id": profile_id,
@@ -715,6 +791,20 @@ def build_regression_rows(
                     "interview_required": interview_required,
                     "source_url": opportunity.source_url,
                     "verified_opportunity": verified,
+                    # ML-2C enriched columns
+                    "opportunity_inferred_role_cluster": signals.get("role_cluster") or "",
+                    "opportunity_inferred_interests": _join_any(
+                        signals.get("inferred_interests", [])
+                    ),
+                    "opportunity_inferred_skills": _join_any(
+                        signals.get("inferred_skills", [])
+                    ),
+                    "opportunity_required_skills": _join_any(
+                        signals.get("required_skills", [])
+                    ),
+                    "opportunity_preferred_skills": _join_any(
+                        signals.get("preferred_skills", [])
+                    ),
                     **scores,
                 }
             )
@@ -738,20 +828,28 @@ def main() -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
     profiles = build_synthetic_profiles()
-    xlsx_loaded = load_opportunities_from_xlsx()
-    opportunities = xlsx_loaded if xlsx_loaded else get_candidates()
 
-    if xlsx_loaded:
+    # ML-2C: prefer enriched CSV; fall back to xlsx; fall back to placeholders
+    enriched_loaded = load_opportunities_from_enriched_csv()
+    if enriched_loaded:
+        opportunities = enriched_loaded
         print(
             f"[build_regression_dataset] Loaded {len(opportunities)} opportunities "
-            f"from {OPPORTUNITIES_XLSX_PATH}"
+            f"from {OPPORTUNITIES_ENRICHED_CSV_PATH} (enriched)"
         )
     else:
-        print(
-            "[build_regression_dataset] WARNING: Excel file missing or empty — "
-            f"using placeholder opportunities ({len(opportunities)} rows). "
-            f"Expected path: {OPPORTUNITIES_XLSX_PATH}"
-        )
+        xlsx_loaded = load_opportunities_from_xlsx()
+        opportunities = xlsx_loaded if xlsx_loaded else get_candidates()
+        if xlsx_loaded:
+            print(
+                f"[build_regression_dataset] Loaded {len(opportunities)} opportunities "
+                f"from {OPPORTUNITIES_XLSX_PATH}"
+            )
+        else:
+            print(
+                "[build_regression_dataset] WARNING: Enriched CSV and Excel both "
+                f"missing or empty — using placeholder opportunities ({len(opportunities)} rows)."
+            )
 
     df = build_regression_dataset(profiles, opportunities)
     df.to_csv(OUTPUT_FILE, index=False)

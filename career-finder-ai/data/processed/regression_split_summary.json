@@ -1,0 +1,14 @@
+{
+  "total_rows": 8304,
+  "train_rows": 6574,
+  "test_rows": 1730,
+  "train_ratio": 0.7917,
+  "test_ratio": 0.2083,
+  "total_profiles": 48,
+  "train_profiles": 38,
+  "test_profiles": 10,
+  "overlapping_profile_ids": [],
+  "random_state": 42,
+  "test_size": 0.2,
+  "split_method": "GroupShuffleSplit"
+}

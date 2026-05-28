@@ -431,3 +431,34 @@ Chronological log of substantive changes to the repository. Newest at the bottom
 1. `"im a cs student in alkhobar looking for security focused opportunities"` → `major=CS, city=Khobar, interest=Cybersecurity`. Top-5: Cisco NetVersity 70 %, Saudi FDA 67 %, Bank Albilad 67 %, NHC 67 %, Deloitte 64 %.
 2. `"I know Linux and networking"` → skills `[linux, networking]`. **Scores jumped:** Cisco 70→79, Deloitte 64→74, Schneider new at 74, Saudi FDA 67→73, Bank Albilad 67→73. Score-change note: `"New skills added: linux, networking."`. Deloitte `/details 2` Missing skills: `security fundamentals, cybersecurity fundamentals, firewall, siem, incident response, network monitoring, soc, penetration testing` — required (security fundamentals, cybersecurity fundamentals) **before** preferred (firewall, siem, …).
 3. `"I know penetration testing too"` → skills `[linux, networking, penetration testing]`. Top-5: Cisco 75 %, **Help AG Cybersecurity Intern 73 %** (newly surfaced into top), Saudi FDA 71 %, Bank Albilad 71 %, NHC 71 %. Help AG `/details 2` Missing skills: `security fundamentals, cybersecurity fundamentals, firewall, siem, incident response, network monitoring, soc, vulnerability assessment` — student's `penetration testing` correctly removed from missing; required before preferred preserved; matched skills now include `networking, penetration testing`.
+
+---
+
+## 2026-05-28 — ML-2C enriched dataset metadata pass and train/test split inspection
+
+**Where.** ackend/app/enrich_opportunities_dataset.py (new), ackend/app/build_regression_dataset.py, ackend/app/inspect_regression_split.py (new), 	ests/test_regression_dataset.py.
+
+**What changed.**
+
+- **enrich_opportunities_dataset.py** (new): Loads Opportunities_Clean.xlsx, calls enrich_opportunity_signals() for each row, and writes Opportunities_Enriched.csv with five new columns: inferred_role_cluster, inferred_interests, inferred_skills, 
+equired_skills, preferred_skills. List values stored as semicolon-separated strings. Source Excel is not mutated. Prints a summary of enriched rows.
+- **uild_regression_dataset.py** updated:
+  - Prefers Opportunities_Enriched.csv if it exists; falls back to Opportunities_Clean.xlsx; falls back to placeholder opportunities.
+  - Five new enriched columns added to CSV_COLUMNS and populated in uild_regression_rows() via enrich_opportunity_signals(): opportunity_inferred_role_cluster, opportunity_inferred_interests, opportunity_inferred_skills, opportunity_required_skills, opportunity_preferred_skills.
+  - All existing columns preserved; no test breakage.
+- **inspect_regression_split.py** (new): Loads the regression dataset and applies GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42) grouped by profile_id. Writes four files: 
+egression_train_split.csv, 
+egression_test_split.csv, 
+egression_split_profile_ids.csv, 
+egression_split_summary.json. Prints a readable terminal summary. Verifies: ratio ~80/20, no profile_id overlap across splits.
+
+**Why.** Before training a model the team needs to verify: what data is used for training vs testing, whether the split ratio is correct, and whether profiles are not leaking across splits. The enriched CSV also pre-computes inferred signals so the dataset builder can pick them up without re-running enrichment every time.
+
+**Test results.** pytest tests/test_regression_dataset.py → 16/16 passed (7 new ML-2C tests added). pytest tests/test_recommender.py → 48/48 passed. pytest tests/test_parser.py → 70/70 passed. pytest tests/test_scoring.py → 39/39 passed.
+
+**What did NOT change.**
+
+- Frontend UI, auth, search, database persistence.
+- No model training (models directory not modified).
+- Rubric weights and TARGET_WEIGHTS unchanged.
+- Opportunities_Clean.xlsx is read-only — never mutated.

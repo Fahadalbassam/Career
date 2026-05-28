@@ -122,3 +122,22 @@ No frontend UI, auth, database, or recommender response-contract changes were ma
 **Expected behaviour confirmed.** A user who provides more "required-for-role" skills sees logical score gains and a smaller / more actionable missing-skills list. Preferred-only matches still contribute (0.4 weight) but cannot dominate.
 
 **What was NOT verified.** Frontend UI, auth, database persistence, search page, model training — none changed in ML-2B.1.
+
+## 2026-05-28 — ML-2C enriched dataset metadata pass and split inspection
+
+| Suite | Command | Result | Notes |
+|---|---|---|---|
+| Regression dataset | python -m pytest tests/test_regression_dataset.py -q | **16 passed** | 7 new ML-2C tests added: enriched builder creates CSV, enriched output has required columns, regression dataset includes enriched columns, split inspection creates output files, no profile_id overlap, ratio ~80/20, summary JSON has expected keys. |
+| Recommender | python -m pytest tests/test_recommender.py -q | **48 passed** | Unchanged from ML-2B.1. |
+| Parser | python -m pytest tests/test_parser.py -q | **70 passed** | Unchanged. |
+| Scoring | python -m pytest tests/test_scoring.py -q | **39 passed** | Unchanged. |
+| All non-training | python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_regression_dataset.py tests/test_scoring.py -q | **173 passed** | Aggregate run. |
+
+**Split inspection results.** 
+egression_split_summary.json confirmed:
+- overlapping_profile_ids: []
+- 	rain_ratio: ≈ 0.80
+- 	est_ratio: ≈ 0.20
+- split_method: GroupShuffleSplit
+
+**What was NOT verified.** Frontend UI, auth, database persistence, search page, model training — none changed in ML-2C.
