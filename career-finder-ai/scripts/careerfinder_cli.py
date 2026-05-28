@@ -27,6 +27,7 @@ ML-2B updates
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -35,6 +36,7 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from pathlib import Path
 from typing import Any, Literal
 
 API_BASE = os.environ.get("CAREERFINDER_API_BASE", "http://127.0.0.1:8000").rstrip("/")
@@ -79,6 +81,10 @@ Commands:
   /links             All ranked source URLs (raw)
   /history           Show remembered user messages
   /undo              Remove last user message and rerun (if any remain)
+  /metrics           Fair + rubric-assisted model metrics (from ML reports)
+  /model             Live ML shadow status (ranking stays rubric-based)
+  /shadow            Rubric vs ML comparison summary
+  /ml                Short combined ML status + key metrics
   /compact           Default compact output
   /verbose           Verbose multi-line recommendation output
   /split             Side-by-side layout when terminal >= 120 cols
@@ -97,6 +103,275 @@ COMMANDS_TIP = (
 )
 
 NO_RECS_MSG = "No recommendations yet. Send your profile first."
+
+METRICS_MISSING_MSG = (
+    "Metrics file not found. Run ML-3/ML-4/ML-5 scripts first."
+)
+
+RUBRIC_ASSISTED_LEAKAGE_WARNING = (
+    "Rubric-assisted metrics are a leakage demo and should not be reported "
+    "as honest model performance."
+)
+
+SHADOW_RECOMMENDATION = (
+    "keep rubric primary, use ML as shadow score"
+)
+
+ML_SCORE_SOURCE = "fair_gradient_boosting"
+MODEL_ARTIFACT_REL = "models/fair_gradient_boosting_model.joblib"
+
+
+def repo_root() -> Path:
+    """Career-finder-ai repo root (parent of ``scripts/``)."""
+    return Path(__file__).resolve().parents[1]
+
+
+def is_ml_shadow_enabled() -> bool:
+    return os.environ.get("CAREERFINDER_ENABLE_ML_SCORE", "").strip().lower() == "true"
+
+
+def _metrics_file_missing(path: Path) -> list[str]:
+    return [
+        METRICS_MISSING_MSG,
+        f"Expected file: {path}",
+        "",
+    ]
+
+
+def _read_metrics_csv(path: Path) -> list[dict[str, str]] | None:
+    if not path.is_file():
+        return None
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+    except (OSError, csv.Error):
+        return None
+
+
+def _best_row_by_mae(rows: list[dict[str, str]], track: str) -> dict[str, str] | None:
+    candidates = [r for r in rows if (r.get("track") or "").strip() == track]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda r: float(r.get("mae") or "inf"))
+
+
+def _fmt_float(value: str | float | None, digits: int = 3) -> str:
+    if value is None or value == "":
+        return "—"
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _fmt_pct_fraction(value: str | float | None) -> str:
+    if value is None or value == "":
+        return "—"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _split_description(row: dict[str, str]) -> str:
+    train_rows = row.get("train_rows", "?")
+    test_rows = row.get("test_rows", "?")
+    train_profiles = row.get("train_profiles", "?")
+    test_profiles = row.get("test_profiles", "?")
+    return (
+        f"GroupShuffleSplit by profile_id - "
+        f"{train_rows} train / {test_rows} test rows "
+        f"({train_profiles} train / {test_profiles} test profiles)"
+    )
+
+
+def _metrics_block_lines(label: str, row: dict[str, str], *, warning: str = "") -> list[str]:
+    leakage = row.get("leakage_safe", "")
+    leakage_text = "true" if str(leakage).lower() in ("true", "1", "yes") else str(leakage)
+    lines = [
+        _section_header(label),
+        f"  Best model:        {row.get('model', '?')}",
+        f"  MAE:               {_fmt_float(row.get('mae'))}",
+        f"  RMSE:              {_fmt_float(row.get('rmse'))}",
+        f"  R²:                {_fmt_float(row.get('r2'))}",
+        f"  Precision@1:       {_fmt_pct_fraction(row.get('precision_at_1'))}",
+        f"  Precision@3:       {_fmt_pct_fraction(row.get('precision_at_3'))}",
+        f"  Precision@5:       {_fmt_pct_fraction(row.get('precision_at_5'))}",
+        f"  Train rows:        {row.get('train_rows', '?')}",
+        f"  Test rows:         {row.get('test_rows', '?')}",
+        f"  Train/test split:  {_split_description(row)}",
+        f"  Leakage-safe:      {leakage_text}",
+        "",
+    ]
+    if warning:
+        lines.insert(1, f"  WARNING: {warning}")
+        lines.insert(2, "")
+    return lines
+
+
+def build_metrics_lines() -> list[str]:
+    """Return lines for ``/metrics`` (fair + rubric-assisted sections)."""
+    fair_path = repo_root() / "data/processed/fair_regression_model_metrics.csv"
+    rubric_path = (
+        repo_root() / "data/processed/rubric_assisted_regression_model_metrics.csv"
+    )
+
+    fair_rows = _read_metrics_csv(fair_path)
+    if fair_rows is None:
+        return _metrics_file_missing(fair_path)
+
+    fair_best = _best_row_by_mae(fair_rows, "fair")
+    if fair_best is None:
+        return [
+            METRICS_MISSING_MSG,
+            f"Expected fair model rows in: {fair_path}",
+            "",
+        ]
+
+    lines = _metrics_block_lines("Fair model metrics (leakage-safe)", fair_best)
+
+    rubric_rows = _read_metrics_csv(rubric_path)
+    if rubric_rows is None:
+        lines.extend(_metrics_file_missing(rubric_path))
+        return lines
+
+    rubric_best = _best_row_by_mae(rubric_rows, "rubric_assisted")
+    if rubric_best is None:
+        lines.extend(
+            [
+                METRICS_MISSING_MSG,
+                f"Expected rubric-assisted rows in: {rubric_path}",
+                "",
+            ]
+        )
+        return lines
+
+    lines.extend(
+        _metrics_block_lines(
+            "Rubric-assisted model metrics (leakage demo)",
+            rubric_best,
+            warning=RUBRIC_ASSISTED_LEAKAGE_WARNING,
+        )
+    )
+    return lines
+
+
+def build_model_status_lines() -> list[str]:
+    """Return lines for ``/model``."""
+    artifact_path = repo_root() / MODEL_ARTIFACT_REL
+    enabled = is_ml_shadow_enabled()
+    artifact_exists = artifact_path.is_file()
+
+    lines = [
+        _section_header("ML system status"),
+        "  Live ranking:        rubric match_score",
+        f"  ML shadow score:     {'enabled' if enabled else 'disabled'}",
+        f"  Model artifact:      {MODEL_ARTIFACT_REL}"
+        + (" (found)" if artifact_exists else " (not found)"),
+        "  Score source:        rubric",
+        f"  ML score source:     {ML_SCORE_SOURCE}",
+        "  Ranking changed by ML: No",
+        "",
+    ]
+    if enabled:
+        lines.append(
+            "  ML shadow scoring is enabled. /recommend may return ml_score, "
+            "but sorting still uses match_score."
+        )
+    else:
+        lines.append(
+            "  ML shadow scoring is disabled. Set CAREERFINDER_ENABLE_ML_SCORE=true "
+            "to include ml_score."
+        )
+    lines.append("")
+    return lines
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def build_shadow_lines() -> list[str]:
+    """Return lines for ``/shadow``."""
+    summary_path = repo_root() / "data/processed/rubric_vs_ml_summary.json"
+    summary = _read_json_file(summary_path)
+    if summary is None:
+        return _metrics_file_missing(summary_path)
+
+    return [
+        _section_header("Rubric vs ML shadow comparison"),
+        f"  Rows compared:              {summary.get('rows_compared', '?')}",
+        f"  Profiles compared:          {summary.get('profiles_compared', '?')}",
+        f"  Mean absolute difference:   {_fmt_float(summary.get('mean_absolute_difference'))}",
+        f"  Median absolute difference: {_fmt_float(summary.get('median_absolute_difference'))}",
+        f"  Max difference:             {_fmt_float(summary.get('max_absolute_difference'))}",
+        f"  Pearson correlation:        {_fmt_float(summary.get('pearson_correlation'))}",
+        f"  Spearman correlation:       {_fmt_float(summary.get('spearman_correlation'))}",
+        f"  Average top-5 overlap:      {_fmt_float(summary.get('average_overlap_at_5'))}",
+        f"  Recommendation:             {SHADOW_RECOMMENDATION}",
+        "",
+    ]
+
+
+def build_ml_summary_lines() -> list[str]:
+    """Return lines for ``/ml`` (status + best fair model + shadow note)."""
+    lines = build_model_status_lines()
+
+    fair_path = repo_root() / "data/processed/fair_regression_model_metrics.csv"
+    fair_rows = _read_metrics_csv(fair_path)
+    if fair_rows is None:
+        lines.extend(_metrics_file_missing(fair_path))
+        return lines
+
+    fair_best = _best_row_by_mae(fair_rows, "fair")
+    if fair_best is None:
+        lines.extend(
+            [
+                METRICS_MISSING_MSG,
+                f"Expected fair model rows in: {fair_path}",
+                "",
+            ]
+        )
+        return lines
+
+    lines.extend(
+        [
+            _section_header("Best fair model (quick)"),
+            f"  Model:  {fair_best.get('model', '?')}",
+            f"  MAE:    {_fmt_float(fair_best.get('mae'))}",
+            f"  R²:     {_fmt_float(fair_best.get('r2'))}",
+            f"  Recommendation: {SHADOW_RECOMMENDATION}",
+            "",
+        ]
+    )
+    return lines
+
+
+def print_metrics() -> None:
+    for line in build_metrics_lines():
+        _safe_print(line)
+
+
+def print_model_status() -> None:
+    for line in build_model_status_lines():
+        _safe_print(line)
+
+
+def print_shadow() -> None:
+    for line in build_shadow_lines():
+        _safe_print(line)
+
+
+def print_ml_summary() -> None:
+    for line in build_ml_summary_lines():
+        _safe_print(line)
 
 
 # ---------------------------------------------------------------------------
@@ -620,8 +895,16 @@ def print_recommendations_verbose(
         why_text = " • ".join(why) if why else "(none)"
         source = rec.get("source_url") or ""
 
+        ml_score = rec.get("ml_score")
+        ml_score_source = rec.get("ml_score_source") or ""
+        score_source = rec.get("score_source", "rubric")
+
         _safe_print(f"\n  #{rank}  {company} — {title}")
         _safe_print(f"       Match score:     {match_score}%")
+        _safe_print(f"       Score source:    {score_source}")
+        if ml_score is not None:
+            ml_label = f"({ml_score_source})" if ml_score_source else ""
+            _safe_print(f"       ML score:        {ml_score}% {ml_label}".rstrip())
         _safe_print(f"       Role cluster:    {role_cluster or '(none)'}")
         _safe_print(f"       City:            {city}")
         _safe_print(f"       Work mode:       {work_mode}")
@@ -641,6 +924,14 @@ def print_recommendation_details(rec: dict[str, Any]) -> None:
     _safe_print(f"  Company:           {rec.get('company', '?')}")
     _safe_print(f"  Title:             {rec.get('title', '?')}")
     _safe_print(f"  Match score:       {rec.get('match_score', 0)}%")
+    _safe_print(f"  Score source:      {rec.get('score_source', 'rubric')}")
+    ml_score = rec.get("ml_score")
+    ml_source = rec.get("ml_score_source") or ""
+    if ml_score is not None:
+        ml_label = f"({ml_source})" if ml_source else ""
+        _safe_print(f"  ML score:          {ml_score}% {ml_label}".rstrip())
+    else:
+        _safe_print("  ML score:          not available")
     _safe_print(f"  Role cluster:      {rec.get('role_cluster') or '(none)'}")
     _safe_print(f"  City:              {rec.get('city', '')}")
     _safe_print(f"  Work mode:         {rec.get('work_mode', '')}")
@@ -927,6 +1218,22 @@ def main() -> int:
 
         if lower == "/help":
             _safe_print(HELP_TEXT)
+            continue
+
+        if lower == "/metrics":
+            print_metrics()
+            continue
+
+        if lower in ("/model",):
+            print_model_status()
+            continue
+
+        if lower == "/shadow":
+            print_shadow()
+            continue
+
+        if lower == "/ml":
+            print_ml_summary()
             continue
 
         if lower == "/compact":

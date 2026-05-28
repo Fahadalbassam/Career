@@ -1,0 +1,15 @@
+{
+  "best_model": "fair_gradient_boosting",
+  "mae": 5.8341880449901975,
+  "rmse": 7.265244026444314,
+  "r2": 0.6476895697829899,
+  "precision_at_1": 0.2,
+  "precision_at_3": 0.2666666666666666,
+  "precision_at_5": 0.24,
+  "total_test_rows": 1730,
+  "worst_error": 25.709076802586907,
+  "best_error": 0.0005761682418494729,
+  "mean_error": 5.834188044990197,
+  "median_error": 5.27974112164701,
+  "profiles_analyzed": 10
+}

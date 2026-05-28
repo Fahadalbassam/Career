@@ -1,6 +1,8 @@
 # Career Finder AI — Frontend
 
-Next.js (App Router) UI for **Career Finder AI**: Saudi COOP and internship recommendations for computing students. This package currently ships **layout, navigation, and placeholder routes** only — no backend, auth, or database calls yet.
+Next.js (App Router) UI for **Career Finder AI**: Saudi COOP and internship recommendations for computing students.
+
+**`/chat`** calls the FastAPI backend (`POST /recommend` via `src/lib/api.ts`). If the backend is unreachable, demo/mock shelf content still appears. **Auth** pages are stubs (no real login). **`/search`**, **`/dashboard`**, and **`/model`** are not final product surfaces yet.
 
 ## Prerequisites
 
@@ -28,17 +30,20 @@ Other scripts:
 - `npm run build` — production build
 - `npm run start` — serve production build
 - `npm run lint` — ESLint
+- `npm run test:e2e` — Playwright smoke tests (starts backend + dev server; run `npx playwright install chromium` once)
+- `npm run test:e2e:ui` — Playwright UI mode
 
 ## Pages
 
 | Route | Description |
 |-------|-------------|
 | `/` | Marketing-style home: hero, CTAs to chat and search, three feature cards |
-| `/chat` | Placeholder for the future career-match conversation |
-| `/search` | Placeholder for manual browsing / filters |
+| `/chat` | Career-match chat (backend `/recommend` + Fit Shelf; mock fallback if API down) |
+| `/search` | Shell route — structured search UI not wired yet |
 | `/dashboard` | Placeholder for saved progress and history |
 | `/model` | Placeholder for model documentation |
-| `/methodology` | Placeholder for methodology and data explainers |
+| `/methodology` | Methodology and data explainers |
+| `/login`, `/signup` | Auth stub pages |
 
 Global chrome: top **Career Finder AI** navbar with links to all of the above. The root layout wraps the tree with shadcn/ui **`TooltipProvider`** for tooltip primitives.
 

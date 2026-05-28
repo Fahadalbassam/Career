@@ -1,4 +1,4 @@
-mae,rmse,r2,precision_at_5,avg_actual_top5,avg_predicted_top5,model_name,feature_strategy,train_rows,test_rows,split_method,rubric_features_used
-8.987946501624837,10.610394100401917,-0.05574745964237482,0.08,53.7672,64.20964938971572,text_only_ridge,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False
-7.200647700079238,8.735102672118211,0.2844614395965338,0.1,60.3274,63.052998692230894,text_only_random_forest,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False
-5.111492639247203,6.387023609919025,0.6174448455519489,0.12,59.084,60.81371285524267,text_only_gradient_boosting,text_and_categorical_no_rubric,6574.0,1730.0,GroupShuffleSplit(profile_id),False
+track,model,mae,rmse,r2,precision_at_1,precision_at_3,precision_at_5,train_rows,test_rows,train_profiles,test_profiles,feature_set,leakage_safe
+fair,fair_ridge,10.311435446630664,12.185920868973145,0.008844498427820757,0.2,0.2,0.18,6574,1730,38,10,text_and_categorical_no_rubric,True
+fair,fair_random_forest,7.373747227663846,9.047615860250952,0.4536217597006337,0.2,0.2333333333333333,0.22000000000000003,6574,1730,38,10,text_and_categorical_no_rubric,True
+fair,fair_gradient_boosting,5.8341880449901975,7.265244026444314,0.6476895697829899,0.2,0.26666666666666666,0.24,6574,1730,38,10,text_and_categorical_no_rubric,True

@@ -1,0 +1,7 @@
+track,model,mae,rmse,r2,precision_at_1,precision_at_3,precision_at_5,train_rows,test_rows,train_profiles,test_profiles,feature_set,leakage_safe
+fair,fair_gradient_boosting,5.8341880449901975,7.265244026444314,0.6476895697829899,0.2,0.2666666666666666,0.24,6574,1730,38,10,text_and_categorical_no_rubric,True
+fair,fair_random_forest,7.373747227663846,9.047615860250952,0.4536217597006337,0.2,0.2333333333333333,0.22,6574,1730,38,10,text_and_categorical_no_rubric,True
+fair,fair_ridge,10.311435446630664,12.185920868973144,0.0088444984278207,0.2,0.2,0.18,6574,1730,38,10,text_and_categorical_no_rubric,True
+rubric_assisted,rubric_assisted_ridge,0.0229191820833248,0.0281414438666374,0.9999947141134088,0.4,0.2666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False
+rubric_assisted,rubric_assisted_gradient_boosting,0.630376166526412,0.9094010330923245,0.9944800394349216,0.4,0.2666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False
+rubric_assisted,rubric_assisted_random_forest,1.9175120011425435,3.092530105607251,0.9361658674678106,0.4,0.2666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False

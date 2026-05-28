@@ -49,5 +49,14 @@ dist/
 
 # Test and coverage artefacts
 .pytest_cache/
+backend/.pytest_cache/
+backend/pytest-cache-files-*/
 .coverage
 htmlcov/
+
+# Manual CLI capture logs (local smoke tests)
+cli_out*.txt
+backend/cli_out*.txt
+
+# Archived legacy generated outputs (see data/archive/README.md)
+data/archive/

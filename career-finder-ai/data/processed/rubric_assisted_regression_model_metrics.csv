@@ -1,0 +1,4 @@
+track,model,mae,rmse,r2,precision_at_1,precision_at_3,precision_at_5,train_rows,test_rows,train_profiles,test_profiles,feature_set,leakage_safe
+rubric_assisted,rubric_assisted_ridge,0.022919182083324843,0.028141443866637472,0.9999947141134088,0.4,0.26666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False
+rubric_assisted,rubric_assisted_random_forest,1.9175120011425433,3.092530105607251,0.9361658674678106,0.4,0.26666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False
+rubric_assisted,rubric_assisted_gradient_boosting,0.630376166526412,0.9094010330923245,0.9944800394349217,0.4,0.26666666666666666,0.24,6574,1730,38,10,text_and_rubric_components,False

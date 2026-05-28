@@ -141,3 +141,305 @@ egression_split_summary.json confirmed:
 - split_method: GroupShuffleSplit
 
 **What was NOT verified.** Frontend UI, auth, database persistence, search page, model training — none changed in ML-2C.
+
+---
+
+## 2026-05-28 — ML-3 Regression model training (fair + rubric-assisted)
+
+| Suite | Command | Result | Notes |
+|---|---|---|---|
+| Fair regression training | `pytest tests/test_fair_regression_training.py -v` | **22 passed** | New tests: leakage guard (4 tests), feature building (5 tests), metrics helpers (3 tests), output path names (2 tests), integration tests on small fixture (6 tests), compare_regression_models unit tests (2 tests). |
+| Rubric-assisted regression training | `pytest tests/test_regression_training.py -v` | **9 passed** | Updated: path assertions changed to `rubric_assisted_*` names; `TRACK_LABEL` assertion added. |
+| Regression dataset | `pytest tests/test_regression_dataset.py -v` | **16 passed** | Unchanged from ML-2C. |
+| All three suites | `pytest tests/test_fair_regression_training.py tests/test_regression_training.py tests/test_regression_dataset.py -v` | **47 passed** | Aggregate run. |
+
+**Training scripts executed.**
+
+```
+python -m app.train_fair_regression_model
+python -m app.train_regression_model
+python -m app.compare_regression_models
+```
+
+All three completed without error.
+
+**Artifacts verified (all present):**
+
+| Artifact | Status |
+|---|---|
+| models/fair_ridge_model.joblib | OK |
+| models/fair_random_forest_model.joblib | OK |
+| models/fair_gradient_boosting_model.joblib | OK |
+| models/rubric_assisted_ridge_model.joblib | OK |
+| models/rubric_assisted_random_forest_model.joblib | OK |
+| models/rubric_assisted_gradient_boosting_model.joblib | OK |
+| data/processed/fair_regression_model_metrics.csv | OK |
+| data/processed/fair_regression_predictions.csv | OK |
+| data/processed/rubric_assisted_regression_model_metrics.csv | OK |
+| data/processed/rubric_assisted_regression_predictions.csv | OK |
+| data/processed/model_metrics_report.csv | OK |
+| docs/reports/model_metrics_summary.md | OK |
+| reports/figures/fair_regression_prediction_vs_actual.png | OK |
+
+**Metrics summary.**
+
+Fair models (leakage-safe):
+
+| Model | MAE | RMSE | R² | P@5 |
+|---|---|---|---|---|
+| fair_gradient_boosting | 5.834 | 7.265 | 0.648 | 0.240 |
+| fair_random_forest | 7.374 | 9.048 | 0.454 | 0.220 |
+| fair_ridge | 10.311 | 12.186 | 0.009 | 0.180 |
+
+Rubric-assisted (leakage demo — NOT the honest result):
+
+| Model | MAE | RMSE | R² | P@5 | leakage_safe |
+|---|---|---|---|---|---|
+| rubric_assisted_ridge | 0.023 | 0.028 | 1.000 | 0.240 | False |
+| rubric_assisted_gradient_boosting | 0.630 | 0.909 | 0.994 | 0.240 | False |
+| rubric_assisted_random_forest | 1.918 | 3.093 | 0.936 | 0.240 | False |
+
+**Split (from regression_split_summary.json):** train=6,574 rows / 38 profiles, test=1,730 rows / 10 profiles, GroupShuffleSplit by profile_id, no overlap.
+
+**What was NOT verified.** Frontend UI, auth, database persistence, search page, `/recommend` live scoring — none changed in ML-3. Models not integrated into live API.
+
+---
+
+## ML-4 — Error analysis and report examples (2026-05-28)
+
+**Command (from `career-finder-ai/`):**
+
+```bash
+cd backend
+python -m app.analyze_model_errors
+python -m app.generate_recommendation_examples
+pytest tests/test_model_error_analysis.py -q
+pytest tests/test_fair_regression_training.py -q
+pytest tests/test_regression_dataset.py -q
+```
+
+**Result:** All commands succeeded.
+
+| Suite | Result |
+|---|---|
+| `tests/test_model_error_analysis.py` | 6 / 6 passed |
+| `tests/test_fair_regression_training.py` | 22 / 22 passed |
+| `tests/test_regression_dataset.py` | 16 / 16 passed |
+| **Total** | **44 / 44 passed** |
+
+**Artifacts verified.**
+
+| File | OK |
+|---|---|
+| `data/processed/fair_model_error_analysis.csv` | Yes |
+| `data/processed/fair_model_worst_predictions.csv` | Yes |
+| `data/processed/fair_model_best_predictions.csv` | Yes |
+| `data/processed/fair_model_profile_error_summary.csv` | Yes |
+| `data/processed/fair_model_error_summary.json` | Yes |
+| `data/processed/report_recommendation_examples.csv` | Yes |
+| `docs/reports/example_recommendations.md` | Yes |
+| `docs/reports/ml_results_summary.md` | Yes |
+
+**Error analysis summary (`fair_gradient_boosting`, test split):** mean AE 5.834, median AE 5.280, worst AE 25.709, best AE 0.001, 10 profiles, 1,730 test rows.
+
+**Examples:** 8 profiles, 40 CSV rows (top-5 per profile), markdown report generated.
+
+**What was NOT verified.** Live `/recommend` integration, frontend, auth, search. No model retraining.
+
+---
+
+## ML-5 — Rubric vs ML score comparison (2026-05-28)
+
+**Command (from `career-finder-ai/`):**
+
+```bash
+cd backend
+python -m app.compare_rubric_vs_ml
+pytest tests/test_rubric_vs_ml_comparison.py -q
+pytest tests/test_model_error_analysis.py -q
+pytest tests/test_fair_regression_training.py -q
+```
+
+**Result:** All commands succeeded.
+
+| Suite | Result |
+|---|---|
+| `tests/test_rubric_vs_ml_comparison.py` | 3 / 3 passed |
+| `tests/test_model_error_analysis.py` | 6 / 6 passed |
+| `tests/test_fair_regression_training.py` | 22 / 22 passed |
+| **Total** | **31 / 31 passed** |
+
+**Comparison summary (`fair_gradient_boosting`, 1,730 test rows, 10 profiles):**
+
+| Metric | Value |
+|---|---|
+| Mean absolute difference | 5.834 |
+| Median absolute difference | 5.280 |
+| Max absolute difference | 25.709 |
+| Pearson correlation | 0.833 |
+| Spearman correlation | 0.784 |
+| Average top-5 overlap | 0.360 |
+
+**Artifacts:** `rubric_vs_ml_comparison.csv`, `rubric_vs_ml_largest_disagreements.csv`, `rubric_vs_ml_profile_overlap.csv`, `rubric_vs_ml_summary.json`, `docs/reports/rubric_vs_ml_comparison.md`.
+
+**Recommendation recorded:** Keep rubric as primary live score; use ML as secondary/shadow score first — do not replace ranking yet.
+
+**What was NOT verified.** `/recommend` shadow field, frontend, auth, search.
+
+---
+
+## ML-6 — Optional ML shadow score (2026-05-28)
+
+**Commands (from `career-finder-ai/`):**
+
+```bash
+cd backend
+pytest tests/test_recommender.py -q
+pytest tests/test_fair_regression_training.py -q
+pytest tests/test_rubric_vs_ml_comparison.py -q
+```
+
+**Result:** All suites passed.
+
+| Suite | Result |
+|---|---|
+| `tests/test_recommender.py` | 57 / 57 passed (9 new ML-6 tests) |
+| `tests/test_fair_regression_training.py` | 22 / 22 passed |
+| `tests/test_rubric_vs_ml_comparison.py` | 3 / 3 passed |
+| **Total** | **82 / 82 passed** |
+
+**ML-6 test coverage:**
+
+| Test | Description |
+|---|---|
+| `test_ml6_disabled_by_default_score_source_is_rubric` | Flag unset → score_source="rubric", ml_score=None |
+| `test_ml6_disabled_ranking_still_by_match_score` | Flag unset → ranking still by rubric match_score |
+| `test_ml6_disabled_no_model_load` | Flag unset → recommend succeeds, no model load exception |
+| `test_ml6_enabled_attaches_ml_score` | Flag true + monkeypatched predictor → ml_score attached, ml_score_source set |
+| `test_ml6_enabled_ranking_still_by_rubric_match_score` | Flag true → ranking follows rubric, not ML score |
+| `test_ml6_enabled_score_source_always_rubric` | Flag true → score_source always "rubric" |
+| `test_ml6_predictor_raises_recommend_still_succeeds` | Predictor raises → /recommend still returns rubric results |
+| `test_ml6_predictor_returns_none_values` | Predictor returns None → ml_score and ml_score_source are None |
+| `test_ml6_schema_backward_compat_existing_fields_still_present` | Existing fields (match_score, score, score_breakdown) unaffected |
+| `test_ml6_opportunity_schema_has_new_fields` | Schema defaults: score_source="rubric", ml_score=None, ml_score_source=None |
+
+**Feature flag behaviour:**
+
+- `CAREERFINDER_ENABLE_ML_SCORE` unset or `false` → `/recommend` behaves as before ML-6; no model loaded.
+- `CAREERFINDER_ENABLE_ML_SCORE=true` → `fair_gradient_boosting_model.joblib` lazy-loaded on first request; `ml_score`, `ml_score_source`, `score_source` attached; ranking unchanged.
+
+**What was NOT verified.** Frontend UI, auth, search, model retraining. CLI display verified by code inspection only (not executed interactively).
+
+---
+
+## 2026-05-28 — ML-7 terminal model/metrics inspection commands
+
+**Command:**
+
+```bash
+cd career-finder-ai
+pytest tests/test_cli_ml_commands.py -q
+```
+
+**Result:** 8 / 8 passed.
+
+| Test | Description |
+|---|---|
+| `test_metrics_includes_fair_best_model` | `/metrics` lines include fair_gradient_boosting + leakage warning |
+| `test_metrics_missing_fair_file` | Missing CSV → guidance message + expected path |
+| `test_model_status_disabled` | Flag unset → disabled + env hint |
+| `test_model_status_enabled` | Flag true → enabled + sorting note |
+| `test_shadow_summary` | Shadow lines include correlations + recommendation |
+| `test_shadow_missing_file` | Missing JSON → safe message |
+| `test_ml_summary_combines_status_and_fair` | `/ml` combines status + best fair model |
+| `test_details_ml_score_not_available` | `/details` prints "not available" when ml_score is None |
+
+**Manual CLI checks (piped):**
+
+1. `/metrics` — fair `fair_gradient_boosting` metrics print; rubric-assisted section includes leakage warning.
+2. `/model` — shows ML shadow enabled/disabled from env; states ranking unchanged.
+3. `/shadow` — Pearson/Spearman/top-5 overlap from `rubric_vs_ml_summary.json`.
+4. `/ml` — combined status + best fair MAE.
+5. `/details 1` without ML flag — `ML score: not available`, `Score source: rubric`.
+
+**What was NOT verified.** Interactive `npm run run:terminal` with live backend + `CAREERFINDER_ENABLE_ML_SCORE=true` end-to-end (acceptable per task; automated tests cover CLI logic).
+
+---
+
+## 2026-05-28 — CLEAN-1 low-risk repo housekeeping
+
+**Commands:**
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_cli_ml_commands.py tests/test_recommender.py -q
+cd frontend && npm run lint
+cd frontend && npm run build
+```
+
+**Result:** 66 / 66 passed (`test_cli_ml_commands.py` 8 + `test_recommender.py` 58). `npm run lint` — OK. `npm run build` — OK.
+
+**Scope verified:** No application code changed; archived files not referenced by tests. Recommender and CLI ML command suites remain green.
+
+**What was NOT changed.** Live ranking, UI, models, active processed datasets, test files.
+
+---
+
+## 2026-05-28 — QA-2 Playwright frontend smoke tests
+
+**Setup (one-time per machine):**
+
+```bash
+cd career-finder-ai/frontend
+npm install
+npx playwright install chromium
+```
+
+**Commands:**
+
+```bash
+cd career-finder-ai/frontend
+npm run lint
+npm run build
+npm run test:e2e
+```
+
+**Coverage:**
+
+| Test | Route / behaviour |
+|---|---|
+| home page loads | `/` — CareerFinder.ai hero + CTA |
+| chat page loads | `/chat` — composer placeholder |
+| chat can submit a message | `/chat` — send profile message; expects user bubble, parsed profile, assistant text, or shelf/demo outcome |
+| search page loads | `/search` — nav shell (page body intentionally minimal) |
+| methodology page loads | `/methodology` — heading + snapshot |
+| login page loads | `/login` — email/password form |
+| signup page loads | `/signup` — signup form |
+| no console errors on key pages | `/`, `/chat`, `/search`, `/methodology` — filters benign dev/HMR noise |
+
+**Backend webServer:** Yes — `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000` with health check `http://127.0.0.1:8000/health`.
+
+**Result:** 8 / 8 passed (`npm run test:e2e`, ~15s with dual webServer). `npm run lint` — OK. `npm run build` — OK.
+
+**Flaky area fixed:** Chat submit initially matched hidden Fit Shelf demo text containing "COOP"; assertions now scoped to `main` with `expect().toPass()`. Login/signup use visible text (CardTitle is not a heading role).
+
+---
+
+## DOC-1 — Technical guide created (2026-05-28)
+
+**What changed:** `docs/PROJECT_TECHNICAL_GUIDE.md` created. Tracking docs updated. No application code changed.
+
+**Tests run:** No tests were re-run for DOC-1 (documentation only). All prior test results remain valid.
+
+**What to run to verify the project is clean:**
+
+```bash
+# Backend
+cd career-finder-ai
+python -m pytest tests/test_cli_ml_commands.py tests/test_recommender.py -q
+
+# Frontend
+cd career-finder-ai/frontend
+npm run lint
+npm run build
+```

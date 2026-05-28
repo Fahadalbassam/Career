@@ -1,0 +1,11 @@
+profile_id,chat_message,major,city,skills,interest,row_count,mean_absolute_error,max_absolute_error,mean_target_score,mean_predicted_score
+ce-network-dhahran,Computer engineering student at KFUPM in Dhahran seeking network engineer COOP.,CE,Dhahran,linux; c++,Computer Engineering,173,8.756572848918882,20.9224482075849,44.06936416184971,51.50274489253423
+ds-remote-coop,DS student seeking remote COOP in machine learning and data analysis.,DS,,python; pandas; scikit-learn,,173,8.465932900392787,18.560059937476623,41.33815028901734,49.20817863594031
+eastern-province-cys,Cybersecurity student in Dammam open to Khobar and Dhahran SOC roles.,CYS,Dammam,linux,,173,7.001980234860873,22.15226226512125,55.820809248554916,54.61929113916995
+ds-scientist-jeddah,Data science student at KAU in Jeddah looking for data scientist COOP with statistics and Python.,DS,Jeddah,python; sql; numpy,Data Science,173,6.559138326276313,18.58539620790671,44.1143352601156,49.58657504527159
+remote-only-de,Data engineering student seeking fully remote training anywhere in Saudi Arabia.,DE,Remote,python; sql,,173,5.840828916710174,16.081289907751717,41.786127167630056,45.58178614983694
+cs-iau-backend,CS student at IAU with Python and SQL seeking backend developer internship in Riyadh or Dammam.,CS,Riyadh,python; sql,,173,5.318710681483881,20.65589763124169,63.115606936416185,62.05822107775524
+no-interview-ft,Fintech student seeking internship with no interview required in Riyadh.,FT,Riyadh,sql,,173,4.717736524312686,25.709076802586907,46.971098265895954,49.271421512386844
+de-cloud-dammam,Data engineer student in Dammam targeting cloud and big data training with AWS.,DE,Dammam,python; sql,,173,4.029096672823779,13.336171577111799,41.7935838150289,44.20369362061615
+qual-ielts-intern,Business-oriented CIS student with IELTS 6.5 seeking internship in Jeddah.,CIS,Jeddah,excel; sql,,173,3.9338606619934313,19.043689797621035,51.185202312138735,49.98875628715865
+ds-gpa-ielts,Data science student with GPA 4.5 and IELTS looking for internship in Riyadh.,DS,Riyadh,sql; python,,173,3.718022682129161,15.997130488337895,46.36653179190751,46.28164167162758

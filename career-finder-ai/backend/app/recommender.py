@@ -12,6 +12,7 @@ from typing import List
 
 import pandas as pd
 
+import app.ml_scoring as _ml_scoring
 from app.parser import parse_message
 from app.rubric import (
     SCORE_BREAKDOWN_KEYS,
@@ -423,7 +424,19 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
     # Step 1: filter weak candidates first
     candidates = filter_candidates(profile, candidates)
 
-    # Step 2: score remaining candidates with the shared rubric
+    # Step 2 (optional): batch ML shadow scores before per-item rubric scoring.
+    # When disabled, predict_ml_scores returns an all-None dict instantly.
+    # The outer try/except is a belt-and-suspenders guard: predict_ml_scores
+    # already catches internally, but we must not crash /recommend even if the
+    # ml_scoring module itself raises (e.g. import error, unexpected exception).
+    ml_enabled = _ml_scoring.is_ml_score_enabled()
+    try:
+        ml_scores = _ml_scoring.predict_ml_scores(profile, candidates)
+    except Exception:  # noqa: BLE001
+        ml_scores = {}
+    ml_source = _ml_scoring.get_ml_score_source()
+
+    # Step 3: score remaining candidates with the shared rubric
     scored: List[Opportunity] = []
     for opp in candidates:
         rubric = score_profile_opportunity_pair(profile, opp)
@@ -438,6 +451,9 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
 
         reasons, skills_matched = build_recommendation_reasons(profile, opp)
 
+        raw_ml = ml_scores.get(opp.id) if ml_enabled else None
+        ml_score_int = int(round(raw_ml)) if raw_ml is not None else None
+
         scored.append(
             opp.model_copy(
                 update={
@@ -451,14 +467,17 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
                     "missing_preferred_skills": compute_missing_preferred_skills(profile, opp),
                     "why_recommended": reasons,
                     "skills_matched": skills_matched,
+                    "score_source": "rubric",
+                    "ml_score": ml_score_int,
+                    "ml_score_source": ml_source if ml_score_int is not None else None,
                 }
             )
         )
 
-    # Step 3: sort by match_score (highest first); legacy score is monotone with it
+    # Step 4: sort by match_score (highest first); legacy score is monotone with it
     scored.sort(key=lambda o: o.match_score, reverse=True)
 
-    # Step 4: return Top N with rank numbers
+    # Step 5: return Top N with rank numbers
     top_results = scored[:top_n]
 
     ranked_results: List[Opportunity] = []

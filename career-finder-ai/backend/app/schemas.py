@@ -185,6 +185,26 @@ class Opportunity(BaseModel):
         ),
     )
 
+    # ML-6: optional shadow ML score fields (rubric remains the live score)
+    score_source: str = Field(
+        default="rubric",
+        description='Source of the primary match_score.  Always "rubric" for now.',
+    )
+    ml_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description=(
+            "Optional ML shadow score 0–100 from the fair regression model. "
+            "Present only when CAREERFINDER_ENABLE_ML_SCORE=true. "
+            "Does not affect ranking."
+        ),
+    )
+    ml_score_source: Optional[str] = Field(
+        default=None,
+        description='Model identifier for ml_score, e.g. "fair_gradient_boosting".',
+    )
+
     # Explanation fields returned to the frontend
     why_recommended: List[str] = Field(default_factory=list)
     skills_matched: List[str] = Field(default_factory=list)

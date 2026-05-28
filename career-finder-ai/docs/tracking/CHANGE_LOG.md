@@ -434,6 +434,50 @@ Chronological log of substantive changes to the repository. Newest at the bottom
 
 ---
 
+## 2026-05-28 — ML-3 Regression model training (fair + rubric-assisted)
+
+**Where.** `backend/app/train_fair_regression_model.py`, `backend/app/train_regression_model.py`, `backend/app/compare_regression_models.py` (new), `tests/test_fair_regression_training.py`, `tests/test_regression_training.py`, `docs/reports/model_metrics_summary.md` (new).
+
+**What changed.**
+
+### Track A — Fair regression (leakage-safe)
+
+- `train_fair_regression_model.py` fully updated:
+  - Loads from pre-computed split files (`regression_train_split.csv` / `regression_test_split.csv`) instead of random-splitting internally.
+  - `FAIR_TEXT_COLUMNS` expanded with five enriched columns (`opportunity_inferred_role_cluster`, `opportunity_inferred_interests`, `opportunity_inferred_skills`, `opportunity_required_skills`, `opportunity_preferred_skills`). `source_url` removed (memorisation risk).
+  - `EXCLUDED_RUBRIC_COLUMNS` now includes `target_score` in addition to all eight component scores.
+  - Model output files renamed: `fair_ridge_model.joblib`, `fair_random_forest_model.joblib`, `fair_gradient_boosting_model.joblib`.
+  - Metrics CSV now includes columns: `track`, `model`, `mae`, `rmse`, `r2`, `precision_at_1`, `precision_at_3`, `precision_at_5`, `train_rows`, `test_rows`, `train_profiles`, `test_profiles`, `feature_set`, `leakage_safe`.
+  - Predictions CSV now includes: `profile_id`, `opportunity_id`, `company_name`, `program_name`, `target_score`, `predicted_score`, `absolute_error`, `model`, `rank_actual`, `rank_predicted`.
+- **Best fair model:** `fair_gradient_boosting` — MAE=5.83, RMSE=7.27, R²=0.648, P@5=0.24.
+- `leakage_safe=True` in all fair metrics rows.
+
+### Track B — Rubric-assisted (leakage demo)
+
+- `train_regression_model.py` fully updated:
+  - Same split file loading approach as Track A.
+  - Model output files renamed: `rubric_assisted_ridge_model.joblib`, `rubric_assisted_random_forest_model.joblib`, `rubric_assisted_gradient_boosting_model.joblib`.
+  - Metrics file: `rubric_assisted_regression_model_metrics.csv`. Predictions file: `rubric_assisted_regression_predictions.csv`.
+  - Same column schema as Track A (with `leakage_safe=False`, `track=rubric_assisted`).
+- **Best rubric-assisted model:** `rubric_assisted_ridge` — MAE=0.023, R²≈1.000 (inflated due to leakage — NOT the honest result).
+- `leakage_safe=False` in all rubric-assisted metrics rows.
+
+### Report
+
+- New `compare_regression_models.py`: reads both metrics CSVs, writes combined `model_metrics_report.csv` (fair first, then rubric-assisted, each sorted by MAE), and produces `docs/reports/model_metrics_summary.md` with best models, split stats, and explanation of why rubric-assisted is not the honest result.
+
+### Tests
+
+- `test_fair_regression_training.py` rewritten (22 tests): leakage guard, feature building, metrics helpers, output path names, integration tests on small fixture, compare_regression_models unit tests.
+- `test_regression_training.py` updated (9 tests): path name assertions updated to new `rubric_assisted_*` names.
+- `test_regression_dataset.py` unchanged — 16/16 still pass.
+
+**What did NOT change.** Frontend UI, auth/login, `/recommend` live scoring, terminal CLI, database, search. Models are NOT integrated into `/recommend` yet.
+
+**Why.** ML course requirement: demonstrate that a regression model can be trained on the prepared dataset, with an honest leakage-free model (Track A) and a clearly labelled sanity-check comparison (Track B).
+
+---
+
 ## 2026-05-28 — ML-2C enriched dataset metadata pass and train/test split inspection
 
 **Where.** ackend/app/enrich_opportunities_dataset.py (new), ackend/app/build_regression_dataset.py, ackend/app/inspect_regression_split.py (new), 	ests/test_regression_dataset.py.
@@ -462,3 +506,182 @@ egression_split_summary.json. Prints a readable terminal summary. Verifies: rati
 - No model training (models directory not modified).
 - Rubric weights and TARGET_WEIGHTS unchanged.
 - Opportunities_Clean.xlsx is read-only — never mutated.
+
+---
+
+## 2026-05-28 — ML-4 error analysis and report-ready recommendation examples
+
+**Where.** `backend/app/analyze_model_errors.py` (new), `backend/app/generate_recommendation_examples.py` (new), `tests/test_model_error_analysis.py` (new), `docs/reports/ml_results_summary.md` (new), `docs/reports/example_recommendations.md` (new), `data/processed/fair_model_*.csv`, `data/processed/fair_model_error_summary.json`, `data/processed/report_recommendation_examples.csv`.
+
+**What changed.**
+
+- **analyze_model_errors.py**: Selects best fair model by lowest MAE, joins hold-out predictions with test-split context, writes full error analysis CSV, worst/best 25 rows, per-profile error summary, and JSON summary (`best_model`, metrics, mean/median/worst/best error, profiles analyzed).
+- **generate_recommendation_examples.py**: Builds 8 curated test-profile examples (cyber, backend, data science, AI/ML, cloud, network, plus strongest/weakest mean-error profiles) with top-5 opportunities by rubric `target_score` and fair-model predictions; outputs CSV and course-report markdown with interpretation blocks.
+- **ml_results_summary.md**: Concise report section linking dataset, fair metrics, leakage warning, error analysis stats, example artifacts, limitations, and next steps (rubric vs ML comparison, optional `ml_score` flag).
+
+**Why.** ML-3 produced metrics and models; ML-4 explains *where* the honest model succeeds and fails and supplies narrative examples for the course report without integrating ML into production ranking.
+
+**Test results.** `pytest tests/test_model_error_analysis.py` → 6/6 passed. `pytest tests/test_fair_regression_training.py` → 22/22 passed. `pytest tests/test_regression_dataset.py` → 16/16 passed (44 total).
+
+**What did NOT change.**
+
+- Frontend UI, auth, search, database, live `/recommend` ranking, model retraining, rubric weights.
+
+---
+
+## 2026-05-28 — ML-5 rubric vs fair ML score comparison
+
+**Where.** `backend/app/compare_rubric_vs_ml.py` (new), `tests/test_rubric_vs_ml_comparison.py` (new), `docs/reports/rubric_vs_ml_comparison.md` (new), `data/processed/rubric_vs_ml_*.csv`, `data/processed/rubric_vs_ml_summary.json`.
+
+**What changed.**
+
+- **compare_rubric_vs_ml.py**: Filters best fair model (`fair_gradient_boosting`), compares rubric `target_score` vs ML `predicted_score` on the test split, computes difference stats, Pearson/Spearman correlation, per-profile top-5 overlap@5, and exports largest disagreements plus JSON/markdown summary.
+- **rubric_vs_ml_comparison.md**: Report-ready narrative — purpose, metrics, interpretation, recommendation to keep rubric as primary live score and use ML as shadow/secondary only.
+
+**Why.** ML-4 showed error magnitudes; ML-5 measures whether ML rankings align with the deterministic rubric before wiring an optional `ml_score` field.
+
+**Test results.** `pytest tests/test_rubric_vs_ml_comparison.py` → 3/3. `pytest tests/test_model_error_analysis.py` → 6/6. `pytest tests/test_fair_regression_training.py` → 22/22 (31 total).
+
+**What did NOT change.**
+
+- Live `/recommend` ranking, frontend, auth, search, model retraining.
+
+---
+
+## 2026-05-28 — ML-6 optional ML shadow score behind feature flag
+
+**Where.** `backend/app/ml_scoring.py` (new), `backend/app/schemas.py`, `backend/app/recommender.py`, `tests/test_recommender.py`, `scripts/careerfinder_cli.py`.
+
+**What changed.**
+
+- **ml_scoring.py** (new): Feature-flag module. `is_ml_score_enabled()` reads `CAREERFINDER_ENABLE_ML_SCORE`. `predict_ml_scores(profile, opportunities)` lazy-loads `fair_gradient_boosting_model.joblib` and returns a dict mapping `opportunity.id → ml_score (0–100)`. Model load and prediction are wrapped in `try/except`; on any failure the function returns an all-`None` dict so `/recommend` is never disrupted. Feature construction replicates `CATEGORICAL_COLUMNS + COUNT_FEATURE_COLUMNS` from the training pipeline; the saved sklearn `Pipeline` handles OHE with `handle_unknown="ignore"`.
+- **schemas.py**: Three optional fields added to `Opportunity` with safe defaults:
+  - `score_source: str = "rubric"` — always `"rubric"` (for now).
+  - `ml_score: Optional[int] = None` — 0–100 shadow ML score (only populated when flag is on).
+  - `ml_score_source: Optional[str] = None` — model identifier (`"fair_gradient_boosting"`).
+- **recommender.py**: `recommend()` now batch-calls `_ml_scoring.predict_ml_scores()` before the per-item rubric loop. When ML is disabled (default) this is a no-op returning an all-`None` dict. When enabled, `ml_score` and `ml_score_source` are attached to each `Opportunity` copy. **Sorting remains by `match_score` (rubric) only.**
+- **test_recommender.py**: 9 new ML-6 tests covering: disabled-by-default (score_source=rubric, ml_score=None, ranking unchanged), enabled with monkeypatched predictor (ml_score attached, ranking still by rubric), failure/graceful degradation (predictor raises or returns None → recommend still returns rubric results), schema backward compat (existing fields unaffected, new fields default correctly).
+- **careerfinder_cli.py**: `/details N` now shows `Score source`, and conditionally `ML score: N% (fair_gradient_boosting)` when `ml_score` is present. `/verbose` mode shows the same. Compact table is unchanged.
+
+**Why.** ML-5 concluded that fair ML correlates with rubric (Pearson 0.83) but top-5 overlap is only 36%. Using ML as a secondary shadow score first lets us measure live impact before changing ranking.
+
+**Test results.** `pytest tests/test_recommender.py` — 57/57 passed (9 new ML-6 tests added to prior 48). All other suites unchanged.
+
+**What did NOT change.**
+
+- Live ranking: still sorted by rubric `match_score`.
+- Frontend UI, auth, search, database.
+- Rubric weights or scoring logic.
+- Model artifacts (not retrained).
+
+---
+
+## 2026-05-28 — ML-7 terminal model/metrics inspection commands
+
+**Where.** `scripts/careerfinder_cli.py`, `tests/test_cli_ml_commands.py` (new), `docs/tracking/*`.
+
+**What changed.**
+
+- **careerfinder_cli.py**: New commands `/metrics`, `/model`, `/shadow`, `/ml` read processed ML artifacts under `data/processed/` (stdlib `csv` + `json` only). `/metrics` prints best fair model metrics (MAE, RMSE, R², precision@k, train/test split, leakage-safe) and best rubric-assisted metrics with an explicit leakage warning. `/model` prints live ML shadow status from `CAREERFINDER_ENABLE_ML_SCORE` and confirms rubric ranking is unchanged. `/shadow` prints rubric-vs-ML summary from `rubric_vs_ml_summary.json`. `/ml` combines status + best fair model + shadow recommendation. Missing files print `"Metrics file not found. Run ML-3/ML-4/ML-5 scripts first."` plus the expected path — no crash.
+- **`/details N`**: When `ml_score` is absent, prints `ML score: not available` (ML-6 already showed score when present).
+- **test_cli_ml_commands.py**: 8 lightweight tests for metrics parsing, model flag text, shadow summary, missing-file handling, and details output.
+
+**Why.** ML-6 wired optional shadow scores on `/recommend`; ML-7 makes the terminal CLI useful for course demo/presentation without touching ranking or the web UI.
+
+**Test results.** `pytest tests/test_cli_ml_commands.py` → 8/8 passed.
+
+**What did NOT change.**
+
+- Live ranking (still rubric `match_score`).
+- Frontend UI, auth, search, database.
+- Backend `/recommend` scoring logic (beyond existing ML-6 flag).
+- Model retraining or further ML integration into ranking.
+- Compact recommendation table (no ML column added).
+
+---
+
+## 2026-05-28 — CLEAN-1 low-risk repo housekeeping
+
+**Where.** `.gitignore`, `data/archive/` (new), `backend/README.md`, `frontend/README.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- **Deleted:** root `cli_out.txt`–`cli_out4.txt`, `backend/cli_out.txt`, stray `backend/pytest-cache-files-yya_ts3p/` (manual CLI captures and pytest cache clutter).
+- **Archived** (moved, not deleted) to `data/archive/`:
+  - `regression_model_metrics.csv` (was `data/processed/`)
+  - `regression_predictions.csv` (was `data/processed/`)
+  - `regression_prediction_vs_actual.png` (was `reports/figures/`)
+  - Superseded by fair/rubric-assisted ML-3 outputs; no code or test imports of these paths (only `docs/PROJECT_DIRECTION.md` mentions the old metrics filename historically).
+- **`.gitignore`:** `cli_out*.txt`, `backend/cli_out*.txt`, `backend/.pytest_cache/`, `backend/pytest-cache-files-*/`, `data/archive/`.
+- **READMEs:** Backend documents `rubric.py` as live scoring, `scoring.py` as legacy, ML shadow flag; frontend documents `/recommend` integration and non-final routes.
+
+**Why.** QA-0 audit identified low-risk clutter without touching live ranking, datasets, models, or tests.
+
+**Test results.** `pytest tests/test_cli_ml_commands.py tests/test_recommender.py`; `npm run lint`; `npm run build` (see TEST_LOG).
+
+**What did NOT change.**
+
+- Frontend UI, backend `/recommend` logic, ranking, ML artifacts in `models/`, active `data/processed/` report files, any test file, `backend/app/scoring.py`.
+
+---
+
+## 2026-05-28 — QA-2 Playwright frontend smoke tests
+
+**Where.** `frontend/playwright.config.ts` (new), `frontend/e2e/smoke.spec.ts` (new), `frontend/package.json`, `frontend/.gitignore`, `docs/tracking/*`.
+
+**What changed.**
+
+- **`@playwright/test`** added as a frontend devDependency; scripts `test:e2e` and `test:e2e:ui`.
+- **`playwright.config.ts`:** `testDir` `./e2e`, `baseURL` `http://localhost:3000`, dual `webServer` (FastAPI `uvicorn` on `:8000` + `npm run dev`), `reuseExistingServer` when not in CI.
+- **`e2e/smoke.spec.ts`:** 8 smoke tests — home, chat load, chat submit (flexible outcome), search shell, methodology, login, signup, console error guard on key pages.
+- **`.gitignore`:** `playwright-report/`, `test-results/`.
+
+**Why.** QA-0 found no e2e coverage; smoke suite proves main routes load and chat accepts input without brittle ranking assertions.
+
+**Test results.** See `TEST_LOG.md` for `lint`, `build`, and `test:e2e`.
+
+**What did NOT change.**
+
+- Frontend UI design, backend `/recommend` logic, ranking, auth, search features, models.
+
+---
+
+## 2026-05-28 — DOC-1 Full project technical guide
+
+**Where.** `docs/PROJECT_TECHNICAL_GUIDE.md` (new). `docs/tracking/IMPLEMENTATION_TRACKER.md`, `docs/tracking/CHANGE_LOG.md`, `docs/tracking/TEST_LOG.md` updated.
+
+**What changed.**
+
+- Created `docs/PROJECT_TECHNICAL_GUIDE.md` — a comprehensive 26-section technical guide covering the entire project:
+  - Project overview and design principles.
+  - End-to-end user flow (web UI and terminal CLI).
+  - Frontend architecture (Next.js routes, chat component, multi-turn memory, session persistence).
+  - Frontend-to-backend API layer (`api.ts`, `api-types.ts`, `api-adapters.ts`, `chat-session.ts`).
+  - Backend FastAPI endpoints (`/health`, `/stats`, `/parse`, `/recommend`) with schema descriptions.
+  - Parser (rule-based NLP, field extraction, normalisation pipeline, alias handling).
+  - Taxonomy (city/skill/interest/role cluster aliases).
+  - Opportunity enrichment (runtime inference buckets, ROLE_SKILL_PROFILES).
+  - Rubric scoring (all 8 components, weights, match_score, score_breakdown, missing_skills).
+  - Recommender flow (filter → ML shadow → rubric score → sort → rank).
+  - ML dataset generation (synthetic profiles, build pipeline, enriched CSV).
+  - Train/test split (GroupShuffleSplit by profile_id, no leakage).
+  - Fair regression model training (three models, best fair_gradient_boosting metrics).
+  - Rubric-assisted model (leakage demo, why not honest).
+  - Error analysis (ML-4 outputs, worst/best predictions, profile summaries).
+  - Rubric vs ML comparison (ML-5: Pearson, Spearman, top-5 overlap).
+  - ML shadow scoring (feature flag, graceful degradation, no ranking change).
+  - Terminal CLI (all commands, multi-turn memory, accidental input guard).
+  - Playwright E2E tests (setup, config, smoke test coverage).
+  - Python/pytest test suite (table of all test files with purpose and command).
+  - Important generated files (table with generated-by / used-by / keep-reason).
+  - Environment variables.
+  - How to run (backend, frontend, CLI, full stack, ML pipeline, tests).
+  - What not to delete (risky files with reasons).
+  - Known limitations.
+  - Suggested next steps.
+  - File and Function Index (bottom index table covering all areas with file links and line ranges).
+- Updated tracking docs to record DOC-1 completion.
+
+**What did NOT change.** No application code, no backend logic, no frontend UI, no ranking, no tests, no ML models.
+
+**Why.** QA-2 is complete. The project now has a full working prototype, ML pipeline, shadow scoring, and E2E tests. A technical guide is required for course report assembly, team onboarding, and evaluator review.

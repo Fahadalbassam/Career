@@ -1,9 +1,0 @@
-﻿python : C:\Python314\python.exe: can't open file 
-'C:\\Users\\fbass\\ml\\Career\\career-finder-ai\\backend\\scripts\\careerfinder_cli.py': [Errno 2] No such file or 
-directory
-At C:\Users\fbass\AppData\Local\Temp\ps-script-207672ed-9ca0-46bd-88c7-21e919e78887.ps1:82 char:11
-+ $inputs | python scripts/careerfinder_cli.py 2>&1 | Out-File -Encodin ...
-+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (C:\Python314\py...le or directory:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 

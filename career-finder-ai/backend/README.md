@@ -45,15 +45,22 @@ pytest
 |------|---------|
 | `app/main.py` | FastAPI app with all endpoints |
 | `app/config.py` | Environment variable configuration |
-| `app/database.py` | SQLite connection helpers |
+| `app/database.py` | SQLite connection helpers (planned; not used by `/recommend` yet) |
 | `app/schemas.py` | Pydantic request/response models |
 | `app/parser.py` | Rule-based student message parser |
-| `app/recommender.py` | Scoring and ranking engine |
-| `app/scoring.py` | Individual score components |
-| `app/clean_data.py` | Dataset cleaning pipeline |
-| `app/build_training_data.py` | Training dataset builder |
-| `app/train_model.py` | TF-IDF + Logistic Regression trainer |
-| `app/evaluate.py` | Model evaluation and metrics |
+| `app/taxonomy.py` | City/interest/skill aliases and role clusters |
+| `app/opportunity_enrichment.py` | Runtime opportunity signal enrichment |
+| `app/rubric.py` | **Live scoring** — rubric used by `/recommend` and the regression dataset |
+| `app/recommender.py` | Ranking engine (loads `data/processed/Opportunities_Clean.xlsx`) |
+| `app/ml_scoring.py` | Optional ML shadow score when `CAREERFINDER_ENABLE_ML_SCORE=true` |
+| `app/scoring.py` | Legacy weighted score helpers (still covered by `tests/test_scoring.py`) |
+| `app/build_regression_dataset.py` | ML regression dataset builder |
+| `app/train_fair_regression_model.py` | Fair (leakage-safe) regression training |
+| `app/train_regression_model.py` | Rubric-assisted regression training (leakage demo) |
+
+**Live `/recommend` behaviour:** ranking uses rubric `match_score` only. Set `CAREERFINDER_ENABLE_ML_SCORE=true` to attach optional `ml_score` from `models/fair_gradient_boosting_model.joblib`; sorting is unchanged.
+
+Offline pipelines also include `clean_data.py`, `build_training_data.py`, `train_model.py`, and `evaluate.py` (older classifier track).
 
 ---
 

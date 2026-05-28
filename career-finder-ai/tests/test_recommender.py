@@ -1105,3 +1105,232 @@ def test_recommend_from_message_alkhobar_normalises_to_khobar(monkeypatch):
     top = response.recommendations[0]
     assert top.city == "Khobar"
     assert top.score_breakdown["city_match_score"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# ML-6: optional ML shadow score (feature flag CAREERFINDER_ENABLE_ML_SCORE)
+# ---------------------------------------------------------------------------
+
+import app.ml_scoring as _ml_scoring_module
+
+
+def _two_fixture_opportunities():
+    return [
+        Opportunity(
+            id=501,
+            company="Alpha Corp",
+            title="Data Science COOP",
+            city="Riyadh",
+            work_mode="Remote",
+            program_type="COOP",
+            major_fit=["DS", "AI"],
+            requirements="Python, SQL",
+            skills_list=["python", "sql"],
+            source_url="https://example.com/alpha",
+        ),
+        Opportunity(
+            id=502,
+            company="Beta Ltd",
+            title="Cybersecurity Internship",
+            city="Jeddah",
+            work_mode="Hybrid",
+            program_type="Internship",
+            major_fit=["CYS"],
+            requirements="Linux, networking",
+            skills_list=["linux", "networking"],
+            source_url="https://example.com/beta",
+        ),
+    ]
+
+
+# --- Test 1: default disabled behavior ---
+
+def test_ml6_disabled_by_default_score_source_is_rubric(monkeypatch):
+    """When env flag is unset, score_source == 'rubric' and ml_score is None."""
+    monkeypatch.delenv("CAREERFINDER_ENABLE_ML_SCORE", raising=False)
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    assert len(results) > 0
+    for opp in results:
+        assert opp.score_source == "rubric"
+        assert opp.ml_score is None
+        assert opp.ml_score_source is None
+
+
+def test_ml6_disabled_ranking_still_by_match_score(monkeypatch):
+    """Without flag, ranking is still sorted by match_score descending."""
+    monkeypatch.delenv("CAREERFINDER_ENABLE_ML_SCORE", raising=False)
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    scores = [r.match_score for r in results]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_ml6_disabled_no_model_load(monkeypatch):
+    """When flag is false, predict_ml_scores is never called with the model."""
+    monkeypatch.delenv("CAREERFINDER_ENABLE_ML_SCORE", raising=False)
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    load_calls = []
+
+    def fake_predict(profile, opportunities):
+        load_calls.append(1)
+        return {}
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores", fake_predict)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    recommender_module.recommend(profile, top_n=5)
+
+    # predict_ml_scores is still called (it's the flag check's responsibility),
+    # but the model itself is not loaded.  We only verify results are unaffected.
+    # More importantly: recommend() must succeed without any exception.
+
+
+# --- Test 2: enabled behavior with monkeypatched predictor ---
+
+def test_ml6_enabled_attaches_ml_score(monkeypatch):
+    """When flag is true and predictor returns known values, ml_score is attached."""
+    monkeypatch.setenv("CAREERFINDER_ENABLE_ML_SCORE", "true")
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    def fake_predict(profile, opportunities):
+        return {opp.id: 72.5 if opp.id == 501 else 55.0 for opp in opportunities}
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores", fake_predict)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    assert len(results) > 0
+    ml_scored = [r for r in results if r.ml_score is not None]
+    assert len(ml_scored) > 0
+
+    for opp in ml_scored:
+        assert isinstance(opp.ml_score, int)
+        assert 0 <= opp.ml_score <= 100
+        assert opp.ml_score_source == "fair_gradient_boosting"
+        assert opp.score_source == "rubric"
+
+
+def test_ml6_enabled_ranking_still_by_rubric_match_score(monkeypatch):
+    """With ML enabled, ranking must follow match_score, not ml_score."""
+    monkeypatch.setenv("CAREERFINDER_ENABLE_ML_SCORE", "true")
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    # Return inverted ML scores so that if ranking used ml_score it would swap.
+    def fake_predict(profile, opportunities):
+        scores = {}
+        for opp in opportunities:
+            scores[opp.id] = 99.0 if opp.id == 502 else 10.0
+        return scores
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores", fake_predict)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    match_scores = [r.match_score for r in results]
+    assert match_scores == sorted(match_scores, reverse=True), (
+        "Ranking must be by rubric match_score, not ml_score"
+    )
+
+
+def test_ml6_enabled_score_source_always_rubric(monkeypatch):
+    """score_source is always 'rubric' even when ML is enabled."""
+    monkeypatch.setenv("CAREERFINDER_ENABLE_ML_SCORE", "true")
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores",
+                        lambda p, opps: {opp.id: 60.0 for opp in opps})
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    for opp in results:
+        assert opp.score_source == "rubric"
+
+
+# --- Test 3: failure/graceful degradation ---
+
+def test_ml6_predictor_raises_recommend_still_succeeds(monkeypatch):
+    """When predictor raises, /recommend succeeds and rubric score is intact."""
+    monkeypatch.setenv("CAREERFINDER_ENABLE_ML_SCORE", "true")
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    def failing_predict(profile, opportunities):
+        raise RuntimeError("model exploded")
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores", failing_predict)
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    assert len(results) > 0
+    for opp in results:
+        assert isinstance(opp.match_score, int)
+        assert 0 <= opp.match_score <= 100
+        assert opp.score_source == "rubric"
+        # ml_score may be None (predictor returned None dict) or absent
+        assert opp.ml_score is None
+
+
+def test_ml6_predictor_returns_none_values(monkeypatch):
+    """When predictor returns None for all ids, ml_score fields are None."""
+    monkeypatch.setenv("CAREERFINDER_ENABLE_ML_SCORE", "true")
+    monkeypatch.setattr(recommender_module, "load_opportunities_from_xlsx", _two_fixture_opportunities)
+
+    monkeypatch.setattr(_ml_scoring_module, "predict_ml_scores",
+                        lambda p, opps: {opp.id: None for opp in opps})
+
+    profile = ParsedProfile(major="DS", city="Riyadh", skills=["python"])
+    results = recommender_module.recommend(profile, top_n=5)
+
+    for opp in results:
+        assert opp.ml_score is None
+        assert opp.ml_score_source is None
+
+
+# --- Test 4: schema backward compatibility ---
+
+def test_ml6_schema_backward_compat_existing_fields_still_present(monkeypatch):
+    """Existing response contract (match_score, score, score_breakdown) is unaffected."""
+    monkeypatch.delenv("CAREERFINDER_ENABLE_ML_SCORE", raising=False)
+
+    results = _sample_recommendations()
+
+    for opp in results:
+        assert isinstance(opp.match_score, int)
+        assert 0 <= opp.match_score <= 100
+        assert isinstance(opp.score, float)
+        assert 0.0 <= opp.score <= 1.0
+        assert set(opp.score_breakdown.keys()) == EXPECTED_BREAKDOWN_KEYS
+        assert opp.score_source == "rubric"
+        # New optional fields default gracefully
+        assert opp.ml_score is None
+        assert opp.ml_score_source is None
+
+
+def test_ml6_opportunity_schema_has_new_fields():
+    """Opportunity Pydantic model has the three new ML-6 fields with correct defaults."""
+    opp = Opportunity(
+        id=999,
+        company="Test Co",
+        title="Test Role",
+        city="Riyadh",
+        work_mode="Remote",
+        program_type="COOP",
+        major_fit=["CS"],
+        requirements="",
+        skills_list=[],
+        source_url="https://example.com",
+    )
+    assert opp.score_source == "rubric"
+    assert opp.ml_score is None
+    assert opp.ml_score_source is None

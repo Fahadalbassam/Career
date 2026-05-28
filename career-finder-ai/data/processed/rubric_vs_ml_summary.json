@@ -1,0 +1,15 @@
+{
+  "best_model": "fair_gradient_boosting",
+  "rows_compared": 1730,
+  "profiles_compared": 10,
+  "mean_absolute_difference": 5.8341880449901975,
+  "median_absolute_difference": 5.27974112164701,
+  "max_absolute_difference": 25.709076802586907,
+  "pearson_correlation": 0.8326617710683122,
+  "spearman_correlation": 0.7837209282288423,
+  "average_overlap_at_5": 0.36000000000000004,
+  "split_method": "GroupShuffleSplit",
+  "train_rows": 6574,
+  "test_rows": 1730,
+  "no_profile_overlap": true
+}

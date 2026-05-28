@@ -1,16 +1,19 @@
 """
 train_fair_regression_model.py – Fair regression evaluation without rubric leakage.
 
-Trains on profile/opportunity text and categorical fields only. Does NOT use
+Trains on profile/opportunity text and categorical fields only.  Does NOT use
 rubric component score columns that were used to construct target_score.
+
+Loads from pre-computed split files (produced by inspect_regression_split.py)
+when they exist; falls back to GroupShuffleSplit when they do not.
 
 Run from the backend directory:
     python -m app.train_fair_regression_model
 
 Outputs:
-    models/regression_text_only_ridge.joblib
-    models/regression_text_only_random_forest.joblib
-    models/regression_text_only_gradient_boosting.joblib
+    models/fair_ridge_model.joblib
+    models/fair_random_forest_model.joblib
+    models/fair_gradient_boosting_model.joblib
     data/processed/fair_regression_model_metrics.csv
     data/processed/fair_regression_predictions.csv
     reports/figures/fair_regression_prediction_vs_actual.png
@@ -22,6 +25,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -49,20 +54,25 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 MODELS_DIR = REPO_ROOT / "models"
 FIGURES_DIR = REPO_ROOT / "reports" / "figures"
+DOCS_REPORTS_DIR = REPO_ROOT / "docs" / "reports"
+
+TRAIN_SPLIT_FILE = PROCESSED_DIR / "regression_train_split.csv"
+TEST_SPLIT_FILE = PROCESSED_DIR / "regression_test_split.csv"
 
 FAIR_METRICS_FILE = PROCESSED_DIR / "fair_regression_model_metrics.csv"
 FAIR_PREDICTIONS_FILE = PROCESSED_DIR / "fair_regression_predictions.csv"
 FAIR_FIGURE_FILE = FIGURES_DIR / "fair_regression_prediction_vs_actual.png"
-RUBRIC_METRICS_FILE = PROCESSED_DIR / "regression_model_metrics.csv"
 
-RIDGE_MODEL_FILE = MODELS_DIR / "regression_text_only_ridge.joblib"
-RANDOM_FOREST_MODEL_FILE = MODELS_DIR / "regression_text_only_random_forest.joblib"
-GRADIENT_BOOSTING_MODEL_FILE = MODELS_DIR / "regression_text_only_gradient_boosting.joblib"
+RIDGE_MODEL_FILE = MODELS_DIR / "fair_ridge_model.joblib"
+RANDOM_FOREST_MODEL_FILE = MODELS_DIR / "fair_random_forest_model.joblib"
+GRADIENT_BOOSTING_MODEL_FILE = MODELS_DIR / "fair_gradient_boosting_model.joblib"
 
 RANDOM_STATE = 42
+RELEVANCE_THRESHOLD = 70.0
+TRACK_LABEL = "fair"
 
 # Rubric columns must never appear as model inputs
-EXCLUDED_RUBRIC_COLUMNS: List[str] = list(NUMERIC_COMPONENT_COLUMNS)
+EXCLUDED_RUBRIC_COLUMNS: List[str] = list(NUMERIC_COMPONENT_COLUMNS) + [TARGET_COLUMN]
 
 FAIR_TEXT_COLUMNS: List[str] = [
     "chat_message",
@@ -85,8 +95,12 @@ FAIR_TEXT_COLUMNS: List[str] = [
     "opportunity_skills",
     "opportunity_requirements",
     "opportunity_role_cluster",
+    "opportunity_inferred_role_cluster",
+    "opportunity_inferred_interests",
+    "opportunity_inferred_skills",
+    "opportunity_required_skills",
+    "opportunity_preferred_skills",
     "interview_required",
-    "source_url",
     "verified_opportunity",
 ]
 
@@ -108,11 +122,28 @@ COUNT_FEATURE_COLUMNS: List[str] = [
     "preferred_location_count",
 ]
 
-FAIR_REQUIRED_COLUMNS: List[str] = (
-    [GROUP_COLUMN, TARGET_COLUMN, "opportunity_id", "company_name", "program_name"]
-    + FAIR_TEXT_COLUMNS
-    + EXCLUDED_RUBRIC_COLUMNS
-)
+
+# ---------------------------------------------------------------------------
+# Split file loading
+# ---------------------------------------------------------------------------
+
+def load_split_files() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load train/test from pre-computed split files if they exist."""
+    if TRAIN_SPLIT_FILE.exists() and TEST_SPLIT_FILE.exists():
+        train_df = pd.read_csv(TRAIN_SPLIT_FILE)
+        test_df = pd.read_csv(TEST_SPLIT_FILE)
+        print(
+            f"[train_fair_regression_model] Loaded split files: "
+            f"train={len(train_df)} rows / {train_df[GROUP_COLUMN].nunique()} profiles, "
+            f"test={len(test_df)} rows / {test_df[GROUP_COLUMN].nunique()} profiles"
+        )
+        return train_df, test_df
+    print(
+        "[train_fair_regression_model] Split files not found — "
+        "falling back to GroupShuffleSplit on full dataset."
+    )
+    raw_df = load_regression_dataset(DATASET_FILE)
+    return group_train_test_split(raw_df)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +296,39 @@ def build_engineered_gb_pipeline() -> Pipeline:
 
 
 # ---------------------------------------------------------------------------
+# Metrics helpers
+# ---------------------------------------------------------------------------
+
+def _compute_all_precision(ranking_frame: pd.DataFrame) -> Dict[str, float]:
+    """Compute precision at 1, 3, and 5 (re-uses precision_at_k with different k)."""
+    result: Dict[str, float] = {}
+    for k_val in (1, 3, 5):
+        p = precision_at_k(
+            ranking_frame,
+            k=k_val,
+            relevance_threshold=RELEVANCE_THRESHOLD,
+        )
+        result[f"precision_at_{k_val}"] = p["precision_at_5"]
+    return result
+
+
+def _add_rank_columns(predictions_df: pd.DataFrame) -> pd.DataFrame:
+    """Add rank_actual and rank_predicted per profile (1 = best)."""
+    df = predictions_df.copy()
+    df["rank_actual"] = (
+        df.groupby(GROUP_COLUMN)["target_score"]
+        .rank(ascending=False, method="min")
+        .astype(int)
+    )
+    df["rank_predicted"] = (
+        df.groupby(GROUP_COLUMN)["predicted_score"]
+        .rank(ascending=False, method="min")
+        .astype(int)
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Training / evaluation
 # ---------------------------------------------------------------------------
 
@@ -289,10 +353,20 @@ def evaluate_fair_model(
     pipeline: Pipeline,
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
-) -> Tuple[Dict[str, float], pd.DataFrame]:
+) -> Tuple[Dict, pd.DataFrame]:
     """Fit fair pipeline and return metrics plus test predictions."""
-    model_kind = model_name.replace("text_only_", "")
-    assert_no_rubric_features(get_fair_model_input_columns(model_kind))
+    model_kind = (
+        model_name.replace("fair_", "").replace("_model", "")
+    )
+    # Map compound names to pipeline kind
+    if model_kind in ("random_forest",):
+        kind_key = "random_forest"
+    elif model_kind in ("gradient_boosting",):
+        kind_key = "gradient_boosting"
+    else:
+        kind_key = "ridge"
+
+    assert_no_rubric_features(get_fair_model_input_columns(kind_key))
 
     train_features = build_fair_feature_frame(train_df)
     test_features = build_fair_feature_frame(test_df)
@@ -309,29 +383,52 @@ def evaluate_fair_model(
     y_pred = clip_predictions(pipeline.predict(x_test))
 
     metrics = regression_metrics(y_test, y_pred)
+
     ranking_frame = test_features[
         [GROUP_COLUMN, "opportunity_id", "company_name", "program_name", TARGET_COLUMN]
     ].copy()
     ranking_frame["predicted_score"] = y_pred
-    metrics.update(precision_at_k(ranking_frame))
-    metrics["model_name"] = model_name
-    metrics["feature_strategy"] = "text_and_categorical_no_rubric"
-    metrics["train_rows"] = float(len(train_df))
-    metrics["test_rows"] = float(len(test_df))
+    ranking_frame = ranking_frame.rename(columns={TARGET_COLUMN: "actual_score"})
 
-    predictions = ranking_frame.rename(columns={TARGET_COLUMN: "actual_score"})
-    predictions["model_name"] = model_name
-    return metrics, predictions[
+    # Precision at 1, 3, 5
+    frame_for_precision = ranking_frame.rename(columns={"actual_score": TARGET_COLUMN})
+    precision_metrics = _compute_all_precision(frame_for_precision)
+    metrics.update(precision_metrics)
+
+    # Profile counts
+    train_profiles = int(train_df[GROUP_COLUMN].nunique())
+    test_profiles = int(test_df[GROUP_COLUMN].nunique())
+
+    metrics["track"] = TRACK_LABEL
+    metrics["model"] = model_name
+    metrics["train_rows"] = int(len(train_df))
+    metrics["test_rows"] = int(len(test_df))
+    metrics["train_profiles"] = train_profiles
+    metrics["test_profiles"] = test_profiles
+    metrics["feature_set"] = "text_and_categorical_no_rubric"
+    metrics["leakage_safe"] = True
+
+    # Build predictions frame with required columns
+    preds = ranking_frame.rename(columns={"actual_score": "target_score"})
+    preds["model"] = model_name
+    preds["absolute_error"] = (preds["target_score"] - preds["predicted_score"]).abs()
+    preds = _add_rank_columns(preds)
+
+    predictions = preds[
         [
             GROUP_COLUMN,
             "opportunity_id",
             "company_name",
             "program_name",
-            "actual_score",
+            "target_score",
             "predicted_score",
-            "model_name",
+            "absolute_error",
+            "model",
+            "rank_actual",
+            "rank_predicted",
         ]
     ]
+    return metrics, predictions
 
 
 def save_prediction_plot(
@@ -342,7 +439,7 @@ def save_prediction_plot(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.scatter(
-        predictions["actual_score"],
+        predictions["target_score"],
         predictions["predicted_score"],
         alpha=0.35,
         s=12,
@@ -360,74 +457,30 @@ def save_prediction_plot(
     plt.close(fig)
 
 
-def print_rubric_comparison(fair_metrics: pd.DataFrame) -> None:
-    """Print side-by-side summary if rubric-assisted metrics file exists."""
-    if not RUBRIC_METRICS_FILE.exists():
-        print(
-            "[train_fair_regression_model] No rubric-assisted metrics at "
-            f"{RUBRIC_METRICS_FILE} — skip comparison."
-        )
-        return
-
-    rubric_metrics = pd.read_csv(RUBRIC_METRICS_FILE)
-    print("\n=== Comparison: rubric-assisted vs fair (no rubric features) ===")
-    print(
-        "Rubric-assisted models used major_fit_score … interview_score as inputs.\n"
-        "Fair models use text + categoricals only — lower R² is expected and healthier.\n"
-    )
-
-    compare_cols = ["model_name", "mae", "rmse", "r2", "precision_at_5"]
-    print("Rubric-assisted (previous):")
-    print(rubric_metrics[compare_cols].to_string(index=False))
-    print("\nFair text/profile-based (this run):")
-    print(fair_metrics[compare_cols].to_string(index=False))
-
-    rubric_best_r2 = float(rubric_metrics["r2"].max())
-    fair_best_r2 = float(fair_metrics["r2"].max())
-    print(
-        f"\nBest R² — rubric-assisted: {rubric_best_r2:.3f} | fair: {fair_best_r2:.3f}"
-    )
-
-
-def train_all_fair_models(
-    dataset_path: Path = DATASET_FILE,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def train_all_fair_models() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Train fair models and persist metrics, predictions, and model files."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_df = load_regression_dataset(dataset_path)
-    missing_fair = [c for c in FAIR_REQUIRED_COLUMNS if c not in raw_df.columns]
-    if missing_fair:
-        raise ValueError(f"Dataset missing columns for fair training: {missing_fair}")
-
-    train_df, test_df = group_train_test_split(raw_df)
+    train_df, test_df = load_split_files()
 
     print(
-        f"[train_fair_regression_model] Dataset rows: {len(raw_df)} "
-        f"(train={len(train_df)}, test={len(test_df)})"
-    )
-    print(
-        f"[train_fair_regression_model] Split: GroupShuffleSplit({GROUP_COLUMN}), "
-        "test_size=0.2, random_state=42"
+        f"[train_fair_regression_model] train={len(train_df)} rows, "
+        f"test={len(test_df)} rows"
     )
     print(
         "[train_fair_regression_model] EXCLUDED rubric features: "
         + ", ".join(EXCLUDED_RUBRIC_COLUMNS)
     )
 
-    all_metrics: List[Dict[str, float]] = []
+    all_metrics: List[Dict] = []
     all_predictions: List[pd.DataFrame] = []
 
     models = [
-        ("text_only_ridge", build_text_only_ridge_pipeline, RIDGE_MODEL_FILE),
-        ("text_only_random_forest", build_text_categorical_rf_pipeline, RANDOM_FOREST_MODEL_FILE),
-        (
-            "text_only_gradient_boosting",
-            build_engineered_gb_pipeline,
-            GRADIENT_BOOSTING_MODEL_FILE,
-        ),
+        ("fair_ridge", build_text_only_ridge_pipeline, RIDGE_MODEL_FILE),
+        ("fair_random_forest", build_text_categorical_rf_pipeline, RANDOM_FOREST_MODEL_FILE),
+        ("fair_gradient_boosting", build_engineered_gb_pipeline, GRADIENT_BOOSTING_MODEL_FILE),
     ]
 
     for model_name, builder, model_path in models:
@@ -443,26 +496,39 @@ def train_all_fair_models(
         all_predictions.append(predictions)
         joblib.dump(pipeline, model_path)
         print(
-            f"  MAE={metrics['mae']:.3f} RMSE={metrics['rmse']:.3f} "
-            f"R²={metrics['r2']:.3f} Precision@5={metrics['precision_at_5']:.3f}"
+            f"  MAE={metrics['mae']:.3f}  RMSE={metrics['rmse']:.3f}  "
+            f"R²={metrics['r2']:.3f}  P@1={metrics['precision_at_1']:.3f}  "
+            f"P@3={metrics['precision_at_3']:.3f}  P@5={metrics['precision_at_5']:.3f}"
         )
+        print(f"  Saved: {model_path}")
 
-    metrics_df = pd.DataFrame(all_metrics)
-    metrics_df["split_method"] = f"GroupShuffleSplit({GROUP_COLUMN})"
-    metrics_df["rubric_features_used"] = False
+    # Build metrics DataFrame with canonical column order
+    metrics_df = pd.DataFrame(all_metrics)[
+        [
+            "track", "model", "mae", "rmse", "r2",
+            "precision_at_1", "precision_at_3", "precision_at_5",
+            "train_rows", "test_rows", "train_profiles", "test_profiles",
+            "feature_set", "leakage_safe",
+        ]
+    ]
     metrics_df.to_csv(FAIR_METRICS_FILE, index=False)
 
     predictions_df = pd.concat(all_predictions, ignore_index=True)
     predictions_df.to_csv(FAIR_PREDICTIONS_FILE, index=False)
 
-    best_name = metrics_df.sort_values("rmse").iloc[0]["model_name"]
-    best_predictions = predictions_df[predictions_df["model_name"] == best_name]
+    best_name = metrics_df.sort_values("rmse").iloc[0]["model"]
+    best_predictions = predictions_df[predictions_df["model"] == best_name]
     save_prediction_plot(best_predictions, str(best_name))
 
     print(f"\n[train_fair_regression_model] Metrics saved to {FAIR_METRICS_FILE}")
     print(f"[train_fair_regression_model] Predictions saved to {FAIR_PREDICTIONS_FILE}")
     print(f"[train_fair_regression_model] Figure saved to {FAIR_FIGURE_FILE}")
-    print_rubric_comparison(metrics_df)
+
+    best_row = metrics_df.sort_values("mae").iloc[0]
+    print(
+        f"\n[train_fair_regression_model] Best fair model: {best_row['model']} "
+        f"(MAE={best_row['mae']:.3f}, RMSE={best_row['rmse']:.3f}, R²={best_row['r2']:.3f})"
+    )
 
     return metrics_df, predictions_df
 

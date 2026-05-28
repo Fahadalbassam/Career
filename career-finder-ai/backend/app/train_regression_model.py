@@ -1,24 +1,25 @@
 """
-train_regression_model.py – Train and evaluate regression recommenders.
+train_regression_model.py – Rubric-assisted regression (leakage demo / sanity check).
 
-Uses rubric-labelled pairs from:
-    data/processed/student_opportunity_regression_dataset.csv
+Uses rubric component scores (major_fit_score, skill_match_score, …) as numeric
+features alongside text.  Because target_score is a linear combination of those
+same component scores, metrics here are unrealistically strong and should NOT be
+presented as honest model performance.
+
+Loads from pre-computed split files (produced by inspect_regression_split.py)
+when they exist; falls back to GroupShuffleSplit when they do not.
 
 Run from the backend directory:
     python -m app.train_regression_model
 
 Outputs:
-    models/regression_ridge.joblib
-    models/regression_random_forest.joblib
-    models/regression_gradient_boosting.joblib
-    models/regression_vectorizer.joblib  (TF-IDF step from the Ridge pipeline)
-    data/processed/regression_model_metrics.csv
-    data/processed/regression_predictions.csv
-    reports/figures/regression_prediction_vs_actual.png
-
-Limitation:
-    target_score is derived from the same rubric component columns used as
-    numeric features, so metrics can be unrealistically strong (prototype only).
+    models/rubric_assisted_ridge_model.joblib
+    models/rubric_assisted_random_forest_model.joblib
+    models/rubric_assisted_gradient_boosting_model.joblib
+    models/rubric_assisted_vectorizer.joblib
+    data/processed/rubric_assisted_regression_model_metrics.csv
+    data/processed/rubric_assisted_regression_predictions.csv
+    reports/figures/rubric_assisted_regression_prediction_vs_actual.png
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -45,14 +48,17 @@ MODELS_DIR = REPO_ROOT / "models"
 FIGURES_DIR = REPO_ROOT / "reports" / "figures"
 
 DATASET_FILE = PROCESSED_DIR / "student_opportunity_regression_dataset.csv"
-METRICS_FILE = PROCESSED_DIR / "regression_model_metrics.csv"
-PREDICTIONS_FILE = PROCESSED_DIR / "regression_predictions.csv"
-FIGURE_FILE = FIGURES_DIR / "regression_prediction_vs_actual.png"
+TRAIN_SPLIT_FILE = PROCESSED_DIR / "regression_train_split.csv"
+TEST_SPLIT_FILE = PROCESSED_DIR / "regression_test_split.csv"
 
-RIDGE_MODEL_FILE = MODELS_DIR / "regression_ridge.joblib"
-RANDOM_FOREST_MODEL_FILE = MODELS_DIR / "regression_random_forest.joblib"
-GRADIENT_BOOSTING_MODEL_FILE = MODELS_DIR / "regression_gradient_boosting.joblib"
-VECTORIZER_FILE = MODELS_DIR / "regression_vectorizer.joblib"
+METRICS_FILE = PROCESSED_DIR / "rubric_assisted_regression_model_metrics.csv"
+PREDICTIONS_FILE = PROCESSED_DIR / "rubric_assisted_regression_predictions.csv"
+FIGURE_FILE = FIGURES_DIR / "rubric_assisted_regression_prediction_vs_actual.png"
+
+RIDGE_MODEL_FILE = MODELS_DIR / "rubric_assisted_ridge_model.joblib"
+RANDOM_FOREST_MODEL_FILE = MODELS_DIR / "rubric_assisted_random_forest_model.joblib"
+GRADIENT_BOOSTING_MODEL_FILE = MODELS_DIR / "rubric_assisted_gradient_boosting_model.joblib"
+VECTORIZER_FILE = MODELS_DIR / "rubric_assisted_vectorizer.joblib"
 
 TARGET_COLUMN = "target_score"
 GROUP_COLUMN = "profile_id"
@@ -60,6 +66,7 @@ RELEVANCE_THRESHOLD = 70.0
 PRECISION_K = 5
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
+TRACK_LABEL = "rubric_assisted"
 
 TEXT_FEATURE_COLUMNS: List[str] = [
     "chat_message",
@@ -178,6 +185,25 @@ def group_train_test_split(
     return train_df, test_df
 
 
+def load_split_files() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Load train/test from pre-computed split files if they exist."""
+    if TRAIN_SPLIT_FILE.exists() and TEST_SPLIT_FILE.exists():
+        train_df = pd.read_csv(TRAIN_SPLIT_FILE)
+        test_df = pd.read_csv(TEST_SPLIT_FILE)
+        print(
+            f"[train_regression_model] Loaded split files: "
+            f"train={len(train_df)} rows / {train_df[GROUP_COLUMN].nunique()} profiles, "
+            f"test={len(test_df)} rows / {test_df[GROUP_COLUMN].nunique()} profiles"
+        )
+        return train_df, test_df
+    print(
+        "[train_regression_model] Split files not found — "
+        "falling back to GroupShuffleSplit on full dataset."
+    )
+    raw_df = load_regression_dataset(DATASET_FILE)
+    return group_train_test_split(raw_df)
+
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -206,6 +232,7 @@ def precision_at_k(
     Ranking metric by profile: fraction of top-k predictions that are relevant.
 
     Relevant when actual target_score >= relevance_threshold.
+    Returns key 'precision_at_5' for backward compatibility regardless of k.
     """
     if frame.empty:
         return {
@@ -237,6 +264,31 @@ def precision_at_k(
 def clip_predictions(values: np.ndarray) -> np.ndarray:
     """Clamp model outputs to the 0–100 recommendation scale."""
     return np.clip(values, 0.0, 100.0)
+
+
+def _compute_all_precision(ranking_frame: pd.DataFrame) -> Dict[str, float]:
+    """Compute precision at 1, 3, and 5."""
+    result: Dict[str, float] = {}
+    for k_val in (1, 3, 5):
+        p = precision_at_k(ranking_frame, k=k_val, relevance_threshold=RELEVANCE_THRESHOLD)
+        result[f"precision_at_{k_val}"] = p["precision_at_5"]
+    return result
+
+
+def _add_rank_columns(predictions_df: pd.DataFrame) -> pd.DataFrame:
+    """Add rank_actual and rank_predicted per profile (1 = best)."""
+    df = predictions_df.copy()
+    df["rank_actual"] = (
+        df.groupby(GROUP_COLUMN)["target_score"]
+        .rank(ascending=False, method="min")
+        .astype(int)
+    )
+    df["rank_predicted"] = (
+        df.groupby(GROUP_COLUMN)["predicted_score"]
+        .rank(ascending=False, method="min")
+        .astype(int)
+    )
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +389,7 @@ def evaluate_model(
     pipeline: Pipeline,
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
-) -> Tuple[Dict[str, float], pd.DataFrame]:
+) -> Tuple[Dict, pd.DataFrame]:
     """Fit pipeline, compute metrics, and build test prediction rows."""
     train_features = build_feature_frame(train_df)
     test_features = build_feature_frame(test_df)
@@ -356,23 +408,37 @@ def evaluate_model(
         [GROUP_COLUMN, "opportunity_id", "company_name", "program_name", TARGET_COLUMN]
     ].copy()
     ranking_frame["predicted_score"] = y_pred
-    ranking_metrics = precision_at_k(ranking_frame)
-    metrics.update(ranking_metrics)
-    metrics["model_name"] = model_name
-    metrics["train_rows"] = float(len(train_df))
-    metrics["test_rows"] = float(len(test_df))
 
-    predictions = ranking_frame.rename(columns={TARGET_COLUMN: "actual_score"})
-    predictions["model_name"] = model_name
-    predictions = predictions[
+    precision_metrics = _compute_all_precision(ranking_frame)
+    metrics.update(precision_metrics)
+
+    metrics["track"] = TRACK_LABEL
+    metrics["model"] = model_name
+    metrics["train_rows"] = int(len(train_df))
+    metrics["test_rows"] = int(len(test_df))
+    metrics["train_profiles"] = int(train_df[GROUP_COLUMN].nunique())
+    metrics["test_profiles"] = int(test_df[GROUP_COLUMN].nunique())
+    metrics["feature_set"] = "text_and_rubric_components"
+    metrics["leakage_safe"] = False
+
+    # Predictions with required columns
+    preds = ranking_frame.rename(columns={TARGET_COLUMN: "target_score"})
+    preds["model"] = model_name
+    preds["absolute_error"] = (preds["target_score"] - preds["predicted_score"]).abs()
+    preds = _add_rank_columns(preds)
+
+    predictions = preds[
         [
             GROUP_COLUMN,
             "opportunity_id",
             "company_name",
             "program_name",
-            "actual_score",
+            "target_score",
             "predicted_score",
-            "model_name",
+            "absolute_error",
+            "model",
+            "rank_actual",
+            "rank_predicted",
         ]
     ]
 
@@ -388,7 +454,7 @@ def save_prediction_plot(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.scatter(
-        predictions["actual_score"],
+        predictions["target_score"],
         predictions["predicted_score"],
         alpha=0.35,
         s=12,
@@ -397,7 +463,7 @@ def save_prediction_plot(
     ax.plot([0, 100], [0, 100], "r--", linewidth=1, label="Perfect prediction")
     ax.set_xlabel("Actual target_score")
     ax.set_ylabel("Predicted score")
-    ax.set_title(f"Regression – Actual vs Predicted ({model_name})")
+    ax.set_title(f"Rubric-assisted – Actual vs Predicted ({model_name})")
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
     ax.legend(loc="lower right")
@@ -406,9 +472,7 @@ def save_prediction_plot(
     plt.close(fig)
 
 
-def train_all_models(
-    dataset_path: Path = DATASET_FILE,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Pipeline]:
+def train_all_models() -> Tuple[pd.DataFrame, pd.DataFrame, Pipeline]:
     """
     Train Ridge, Random Forest, and Gradient Boosting; save artefacts.
 
@@ -419,30 +483,26 @@ def train_all_models(
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_df = load_regression_dataset(dataset_path)
-    train_df, test_df = group_train_test_split(raw_df)
+    train_df, test_df = load_split_files()
 
     print(
-        f"[train_regression_model] Dataset rows: {len(raw_df)} "
-        f"(train={len(train_df)}, test={len(test_df)})"
-    )
-    print(
-        f"[train_regression_model] Split: GroupShuffleSplit by {GROUP_COLUMN} "
-        f"(test_size={TEST_SIZE}, random_state={RANDOM_STATE})"
+        f"[train_regression_model] train={len(train_df)} rows, "
+        f"test={len(test_df)} rows"
     )
     print(
         "[train_regression_model] WARNING: target_score was built from rubric "
-        "component columns also used as numeric features — expect strong metrics."
+        "component columns also used as numeric features — expect strong metrics. "
+        "This is the rubric_assisted (leakage demo) track."
     )
 
-    all_metrics: List[Dict[str, float]] = []
+    all_metrics: List[Dict] = []
     all_predictions: List[pd.DataFrame] = []
     ridge_pipeline: Optional[Pipeline] = None
 
     model_builders = [
-        ("ridge", build_ridge_pipeline),
-        ("random_forest", build_random_forest_pipeline),
-        ("gradient_boosting", build_gradient_boosting_pipeline),
+        ("rubric_assisted_ridge", build_ridge_pipeline),
+        ("rubric_assisted_random_forest", build_random_forest_pipeline),
+        ("rubric_assisted_gradient_boosting", build_gradient_boosting_pipeline),
     ]
 
     for model_name, builder in model_builders:
@@ -457,35 +517,46 @@ def train_all_models(
         all_metrics.append(metrics)
         all_predictions.append(predictions)
 
-        if model_name == "ridge":
+        if "ridge" in model_name:
             ridge_pipeline = pipeline
             joblib.dump(pipeline, RIDGE_MODEL_FILE)
             joblib.dump(extract_tfidf_vectorizer(pipeline), VECTORIZER_FILE)
-        elif model_name == "random_forest":
+        elif "random_forest" in model_name:
             joblib.dump(pipeline, RANDOM_FOREST_MODEL_FILE)
-        elif model_name == "gradient_boosting":
+        elif "gradient_boosting" in model_name:
             joblib.dump(pipeline, GRADIENT_BOOSTING_MODEL_FILE)
 
         print(
-            f"  MAE={metrics['mae']:.3f} RMSE={metrics['rmse']:.3f} "
-            f"R²={metrics['r2']:.3f} Precision@5={metrics['precision_at_5']:.3f}"
+            f"  MAE={metrics['mae']:.3f}  RMSE={metrics['rmse']:.3f}  "
+            f"R²={metrics['r2']:.3f}  P@5={metrics['precision_at_5']:.3f}"
         )
 
-    metrics_df = pd.DataFrame(all_metrics)
-    metrics_df["split_method"] = f"GroupShuffleSplit({GROUP_COLUMN})"
+    # Build metrics DataFrame with canonical column order
+    metrics_df = pd.DataFrame(all_metrics)[
+        [
+            "track", "model", "mae", "rmse", "r2",
+            "precision_at_1", "precision_at_3", "precision_at_5",
+            "train_rows", "test_rows", "train_profiles", "test_profiles",
+            "feature_set", "leakage_safe",
+        ]
+    ]
     metrics_df.to_csv(METRICS_FILE, index=False)
 
     predictions_df = pd.concat(all_predictions, ignore_index=True)
     predictions_df.to_csv(PREDICTIONS_FILE, index=False)
 
-    best_name = metrics_df.sort_values("rmse").iloc[0]["model_name"]
-    best_predictions = predictions_df[predictions_df["model_name"] == best_name]
+    best_name = metrics_df.sort_values("rmse").iloc[0]["model"]
+    best_predictions = predictions_df[predictions_df["model"] == best_name]
     save_prediction_plot(best_predictions, str(best_name))
 
     print(f"[train_regression_model] Metrics saved to {METRICS_FILE}")
     print(f"[train_regression_model] Predictions saved to {PREDICTIONS_FILE}")
     print(f"[train_regression_model] Figure saved to {FIGURE_FILE}")
     print(f"[train_regression_model] Models saved under {MODELS_DIR}")
+    print(
+        "[train_regression_model] NOTE: These metrics are NOT leakage-safe. "
+        "Do not report them as honest model performance."
+    )
 
     assert ridge_pipeline is not None
     return metrics_df, predictions_df, ridge_pipeline
