@@ -10,6 +10,14 @@ import re
 from typing import List, Optional, Tuple
 
 from app.schemas import ParsedProfile
+from app.taxonomy import (
+    INTEREST_ALIASES,
+    SKILL_ALIASES,
+    find_city_in_text,
+    find_interest_in_text,
+    normalise_skill_aliases,
+    role_clusters_for_interest,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,16 +96,32 @@ SKILL_KEYWORDS: List[str] = [
     "tensorflow",
     "pytorch",
     "docker",
+    "kubernetes",
     "linux",
     "git",
     "aws",
     "azure",
     "gcp",
+    "cloud",
     "tableau",
     "power bi",
     "excel",
     "spark",
     "kafka",
+    "devops",
+    "networking",
+    "cybersecurity",
+    "penetration testing",
+    "prompt engineering",
+    "software testing",
+    "qa",
+    "soc",
+    "siem",
+    "infrastructure",
+    "network security",
+    "incident response",
+    "vulnerability assessment",
+    "cicd",
 ]
 
 # (canonical label, keyword phrases) — longer phrases should be listed first per role
@@ -130,6 +154,37 @@ QUALIFICATION_KEYWORDS: List[Tuple[str, List[str]]] = [
     ("IELTS", ["ielts"]),
     ("AWS", ["aws certified", "aws certification", "aws"]),
     ("Azure", ["azure certified", "azure certification", "azure"]),
+]
+
+INTEREST_KEYWORDS: List[Tuple[str, List[str]]] = [
+    ("Cybersecurity", [
+        "security infrastructure", "penetration testing", "cybersecurity",
+        "cyber security", "soc analyst", "siem", "network security",
+        "information security", "ethical hacking",
+    ]),
+    ("Cloud Computing", [
+        "cloud computing", "cloud infrastructure", "cloud engineer",
+        "devops", "dev ops", "infrastructure", "aws engineer", "azure engineer",
+        "kubernetes", "containers",
+    ]),
+    ("Data Science", [
+        "data science", "machine learning", "deep learning",
+        "artificial intelligence", "nlp", "natural language processing",
+        "computer vision",
+    ]),
+    ("Data Engineering", [
+        "data engineering", "data pipeline", "etl", "data warehouse",
+    ]),
+    ("Software Development", [
+        "software development", "software engineering", "backend development",
+        "frontend development", "full stack", "fullstack", "web development",
+        "mobile development",
+    ]),
+    ("QA/Testing", [
+        "software testing", "quality assurance", "qa engineer",
+        "test automation",
+    ]),
+    ("FinTech", ["fintech", "financial technology"]),
 ]
 
 NO_INTERVIEW_PHRASES: List[str] = [
@@ -190,6 +245,16 @@ def _normalize_text(message: str) -> str:
     text = re.sub(r"\bpowerbi\b", "power bi", text)
     text = re.sub(r"\bscikit\s+learn\b", "scikit-learn", text)
 
+    # Normalize machine learning spacing (must run before skill-alias pass
+    # so the canonical "machine learning" token is present for matching).
+    text = re.sub(r"\bmachine[\s-]+learning\b", "machine learning", text)
+    text = re.sub(r"\bdevsecops\b", "devops", text)
+
+    # Delegate the rest of the skill aliases (dev ops, k8s, pen testing,
+    # infosec, cicd, prompt testing, reactjs, ...) to the taxonomy module.
+    # This keeps the parser and the taxonomy in sync.
+    text = normalise_skill_aliases(text)
+
     # Preserve GPA decimals before punctuation is stripped (e.g. GPA 4.5 → gpa 4_5)
     text = re.sub(
         r"\bgpa\s*(?:is\s*)?(\d+)\.(\d+)\b",
@@ -233,21 +298,8 @@ def _find_university(text: str) -> Optional[str]:
 
 def _find_cities_in_order(text: str) -> List[str]:
     """Return unique Saudi cities in order of first appearance."""
-    matches: List[Tuple[int, str]] = []
-
-    for city in CITY_KEYWORDS:
-        pattern = r"\b" + re.escape(city) + r"\b"
-        for match in re.finditer(pattern, text):
-            matches.append((match.start(), city.capitalize()))
-
-    matches.sort(key=lambda item: item[0])
-
-    ordered: List[str] = []
-    for _, city_name in matches:
-        if city_name not in ordered:
-            ordered.append(city_name)
-
-    return ordered
+    _, cities = find_city_in_text(text, include_extended=False)
+    return cities
 
 
 def _resolve_city_and_preferred_locations(
@@ -258,6 +310,12 @@ def _resolve_city_and_preferred_locations(
 
   - One city: ``city`` is set, ``preferred_locations`` is empty (backward compatible).
   - Multiple cities: ``city`` is the first mentioned; ``preferred_locations`` lists all.
+
+  Saudi-city aliases (``alkhobar``, ``al khobar``, ``al-khobar`` -> ``Khobar``,
+  ``ad dammam`` -> ``Dammam``, ``jedda`` -> ``Jeddah``, ...) are normalised via
+  :mod:`app.taxonomy`. Broader location tokens like ``Remote`` / ``Saudi Arabia``
+  are intentionally left out of this primary detection so they do not stomp on
+  work-mode parsing for messages such as ``"looking for a remote COOP"``.
     """
     cities = _find_cities_in_order(text)
 
@@ -338,6 +396,21 @@ def _find_preferred_roles(text: str) -> List[str]:
     return found
 
 
+def _find_interest_from_text(text: str) -> Optional[str]:
+    """
+    Detect explicit interest areas from text phrases.
+
+    Used as an override when the student states a concrete domain interest
+    (e.g. "security focused" or "interested in security infrastructure")
+    rather than letting the major alone drive the interest field.
+
+    Delegates to :func:`app.taxonomy.find_interest_in_text` which supports the
+    full set of ML-2A aliases (security focused, infosec, dev ops, ci cd,
+    pen testing, model training, ...).
+    """
+    return find_interest_in_text(text)
+
+
 def _find_interview_preference(text: str) -> Optional[str]:
     """Return interview stance when explicitly mentioned."""
     for phrase in NO_INTERVIEW_PHRASES:
@@ -409,7 +482,20 @@ def parse_message(message: str) -> ParsedProfile:
         "CE": "Computer Engineering",
         "FT": "FinTech",
     }
-    interest = interest_map.get(major, None) if major else None
+    # Text-based interest overrides major default when an explicit domain is stated.
+    text_interest = _find_interest_from_text(normalised)
+    major_interest = interest_map.get(major, None) if major else None
+    interest = text_interest or major_interest
+
+    # When the user states an interest but no specific job title, seed
+    # ``preferred_roles`` with the corresponding cluster (e.g. interest
+    # "Cybersecurity" -> ["Cybersecurity", "SOC Analyst", "Network Security",
+    # "Penetration Testing"]). Explicitly detected roles take priority and are
+    # kept ahead of the cluster fallback.
+    if text_interest and not preferred_roles:
+        cluster_roles = role_clusters_for_interest(text_interest)
+        if cluster_roles:
+            preferred_roles = list(cluster_roles)
 
     return ParsedProfile(
         major=major,

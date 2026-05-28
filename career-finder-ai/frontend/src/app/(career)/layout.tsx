@@ -6,7 +6,7 @@ export default function CareerGroupedLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <CareerRouteShell>
-      <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-4 pt-4 pb-10 md:px-6 md:pt-5 md:pb-12">
+      <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-4 md:px-6">
         <CareerShellGrid>{children}</CareerShellGrid>
       </div>
     </CareerRouteShell>

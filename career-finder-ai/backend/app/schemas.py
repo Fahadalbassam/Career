@@ -149,7 +149,30 @@ class Opportunity(BaseModel):
 
     missing_skills: List[str] = Field(
         default_factory=list,
-        description="Opportunity skills the student does not appear to have.",
+        description=(
+            "Opportunity skills the student does not appear to have. "
+            "ML-2B.1: ordered as required → preferred → remaining explicit, "
+            "capped at 8 entries."
+        ),
+    )
+
+    missing_required_skills: List[str] = Field(
+        default_factory=list,
+        description=(
+            "ML-2B.1 optional companion to `missing_skills`. Skills the "
+            "opportunity's role profile lists as required and the student "
+            "does not have. Empty when the opportunity does not map to a "
+            "known role profile."
+        ),
+    )
+
+    missing_preferred_skills: List[str] = Field(
+        default_factory=list,
+        description=(
+            "ML-2B.1 optional companion to `missing_skills`. Skills the "
+            "opportunity's role profile lists as preferred and the student "
+            "does not have. Never overlaps with `missing_required_skills`."
+        ),
     )
 
     score_breakdown: Dict[str, float] = Field(

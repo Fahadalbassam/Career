@@ -15,6 +15,8 @@ import pandas as pd
 from app.parser import parse_message
 from app.rubric import (
     SCORE_BREAKDOWN_KEYS,
+    compute_missing_preferred_skills,
+    compute_missing_required_skills,
     compute_missing_skills,
     infer_interview_required,
     infer_role_cluster,
@@ -445,6 +447,8 @@ def recommend(profile: ParsedProfile, top_n: int = 5) -> List[Opportunity]:
                     "role_cluster": infer_role_cluster(opp),
                     "interview_required": infer_interview_required(opp),
                     "missing_skills": compute_missing_skills(profile, opp),
+                    "missing_required_skills": compute_missing_required_skills(profile, opp),
+                    "missing_preferred_skills": compute_missing_preferred_skills(profile, opp),
                     "why_recommended": reasons,
                     "skills_matched": skills_matched,
                 }

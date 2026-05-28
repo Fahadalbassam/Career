@@ -18,10 +18,17 @@ export const SHELF_ROWS = 3
  * Single chronological list: the six fixed demo tiles first (global indices 0–5), then each
  * finalized save in the order it was added (oldest save → newest save).
  */
+/** Returns true when at least one card carries the explicit "backend" source marker. */
+function usesBackendShelfTiles(savedOldestFirst: CareerFitMemory[]): boolean {
+  return savedOldestFirst.some((m) => m.source === "backend")
+}
+
 export function buildAllShelfCardsOldestFirst(
   finalizedSavedOldestFirst: CareerFitMemory[],
 ): CareerFitMemory[] {
-  const combined = [...DEMO_SHELF_GLOBAL_SIX, ...finalizedSavedOldestFirst]
+  const combined = usesBackendShelfTiles(finalizedSavedOldestFirst)
+    ? finalizedSavedOldestFirst
+    : [...DEMO_SHELF_GLOBAL_SIX, ...finalizedSavedOldestFirst]
   if (combined.length <= SHELF_VISIBLE_GLOBAL_CARD_CAP) return combined
   return combined.slice(0, SHELF_VISIBLE_GLOBAL_CARD_CAP)
 }

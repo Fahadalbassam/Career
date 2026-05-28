@@ -15,6 +15,8 @@ import { ActiveFinalizedFitCard } from "@/components/chat/active-finalized-fit-c
 
 import { CareerLoader } from "@/components/chat/career-loader"
 
+import { ParsedProfileCard } from "@/components/chat/parsed-profile-card"
+
 import { mockRecommendations } from "@/data/mock-recommendations"
 
 import {
@@ -33,42 +35,131 @@ import { useCareerChrome } from "@/components/career/career-nav-context"
 
 import { Button } from "@/components/ui/button"
 
-import type { CareerFitMemory, Recommendation } from "@/lib/types"
-
-const ASSISTANT_TURN_REPLY =
-  "Thanks — I’m using that to narrow Saudi COOP and internship options for you. Ask a follow-up anytime to go deeper or change filters."
+import {
+  buildShelfMemoriesFromRecommendations,
+  mergeStudentProfiles,
+  toCareerFitMemory,
+  toRecommendations,
+  toStudentProfile,
+} from "@/lib/api-adapters"
+import { recommendFromMessage } from "@/lib/api"
+import {
+  clearAnonymousChatSession,
+  loadAnonymousChatSession,
+  saveAnonymousChatSession,
+} from "@/lib/chat-session"
+import type { CareerFitMemory, Recommendation, StudentProfile } from "@/lib/types"
 
 /** Minimum mock delay before the assistant message appears (independent of loader CSS). */
 const ASSISTANT_LOAD_MIN_MS = 4000
+
+const NS = "Not stated"
+
+function isNS(value: string | undefined | null): boolean {
+  return !value || value.trim() === "" || value === NS
+}
+
+function softSkillsOnly(userText: string, profile: StudentProfile): boolean {
+  const lower = userText.toLowerCase()
+  const hasSoftKeyword = [
+    "lead", "organiz", "team", "communic", "present", "coordinat", "manag",
+  ].some((k) => lower.includes(k))
+  const noTechnical =
+    profile.skills.length === 0 ||
+    (profile.skills.length === 1 && profile.skills[0] === NS)
+  return hasSoftKeyword && noTechnical
+}
+
+function buildAssistantReply({
+  profile,
+  recommendations,
+  backendSucceeded,
+  userText,
+}: {
+  profile: StudentProfile | undefined
+  recommendations: Recommendation[]
+  backendSucceeded: boolean
+  userText: string
+}): string {
+  // 1. Backend failed
+  if (!backendSucceeded || !profile) {
+    return "I'm scanning Saudi COOP and internship options. Add your major, city, and technical skills to get a personalised ranking."
+  }
+
+  // 2. Major missing — most critical, always ask first
+  if (isNS(profile.major)) {
+    return "I still need your major to rank opportunities correctly. Are you CS, AI, CYS, CIS, DS, DE, CE, or FinTech?"
+  }
+
+  // 3. Skills missing or only soft skills — ask before praising any match
+  const hasNoTechSkills =
+    profile.skills.length === 0 ||
+    (profile.skills.length === 1 && profile.skills[0] === NS)
+
+  if (hasNoTechSkills) {
+    return "Tell me a few technical skills you have used, such as Python, SQL, Linux, networking, React, Docker, cloud, cybersecurity, or machine learning."
+  }
+
+  if (softSkillsOnly(userText, profile)) {
+    return "Leadership and organisation help, but for computing COOP ranking I also need technical skills. Do you have skills like Python, SQL, Linux, networking, React, cloud, cybersecurity, or machine learning?"
+  }
+
+  // 4. City and preferred locations both missing
+  if (
+    isNS(profile.city) &&
+    (!profile.preferredLocations || profile.preferredLocations.length === 0)
+  ) {
+    return "Which city or preferred location should I prioritise? For example Riyadh, Jeddah, Dammam, Khobar, Dhahran, remote, or multiple."
+  }
+
+  // 5. Program type missing
+  if (isNS(profile.programType)) {
+    return "Are you looking for COOP, internship, Tamheer, or general training?"
+  }
+
+  // 6. Work mode missing
+  if (isNS(profile.workMode)) {
+    return "Do you prefer remote, hybrid, or on-site opportunities?"
+  }
+
+  const topRec = recommendations[0]
+  const topScore = topRec?.scorePercent ?? 0
+
+  // 7. Strong match
+  if (recommendations.length > 0 && topScore >= 85) {
+    return `Strong match found. Your top recommendation is ${topRec!.companyName} — ${topRec!.programName} at ${topScore}% match. I've updated the shelf cards with the best options.`
+  }
+
+  // 8. Good match — suggest more detail
+  if (recommendations.length > 0 && topScore >= 70) {
+    return `I found good matches, but I can improve the ranking if you add more details like preferred role, work mode, or interview preference. Top match: ${topRec!.companyName} — ${topRec!.programName}, ${topScore}%.`
+  }
+
+  // 9. Low confidence
+  if (recommendations.length > 0) {
+    return "I found some early matches, but confidence is still low. Add your preferred role, city, work mode, or stronger technical skills to improve the score."
+  }
+
+  return "I'm scanning Saudi COOP and internship options. Share your major, city, skills, or preferred work mode to get a personalised ranking."
+}
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 function recommendationToMemory(rec: Recommendation): CareerFitMemory {
-  const reason =
-    rec.whyRecommended.length > 140
-      ? `${rec.whyRecommended.slice(0, 137)}…`
-      : rec.whyRecommended
-
-  return {
-    id: uid(),
-
-    title: rec.programName,
-
-    matchConfidence: rec.scorePercent,
-
-    tags: rec.matchedSkills.slice(0, 3),
-
-    shortReason: reason,
-
-    detailText: rec.whyRecommended,
-  }
+  return { ...toCareerFitMemory(rec), id: uid(), source: "manual" }
 }
 
 type ChatEntry =
   | { id: string; role: "user"; content: string }
-  | { id: string; role: "assistant"; variant: "standard" }
+  | {
+      id: string
+      role: "assistant"
+      variant: "standard"
+      parsedProfile?: StudentProfile
+      replyText: string
+    }
   | {
       id: string
 
@@ -116,6 +207,18 @@ export function CareerChat() {
 
   const offerIndexRef = useRef(0)
 
+  const backendRecommendationsRef = useRef<Recommendation[]>([])
+
+  const backendProfileRef = useRef<StudentProfile | null>(null)
+
+  const backendRecommendOkRef = useRef(false)
+
+  /** All user messages sent this session — combined and sent to backend each turn. */
+  const userMessagesRef = useRef<string[]>([])
+
+  /** Accumulated merged profile from all turns (survives page reloads via localStorage). */
+  const mergedProfileRef = useRef<StudentProfile | null>(null)
+
   const empty = entries.length === 0 && !loading
 
   const syncMessagesViewport = useCallback(() => {
@@ -157,6 +260,20 @@ export function CareerChat() {
     })
   }, [])
 
+  // Hydrate anonymous session from localStorage on first mount.
+  // We restore userMessages and the merged profile but do NOT re-render old
+  // chat bubbles — the profile silently informs the first new turn.
+  useEffect(() => {
+    const session = loadAnonymousChatSession()
+    if (!session) return
+    if (session.userMessages.length > 0) {
+      userMessagesRef.current = session.userMessages
+    }
+    if (session.profile) {
+      mergedProfileRef.current = session.profile
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       if (assistantTimeoutRef.current != null) {
@@ -167,6 +284,46 @@ export function CareerChat() {
   }, [])
 
   const runAssistantTurn = useCallback((userText: string) => {
+    // Append latest message to the accumulated history before the fetch.
+    userMessagesRef.current = [...userMessagesRef.current, userText]
+    const combinedMessage = userMessagesRef.current.join("\n")
+
+    // Capture the turn id first so the async closure can detect stale responses.
+    // Clear any backend state left over from a previous turn before the fetch starts.
+    backendRecommendationsRef.current = []
+    backendProfileRef.current = null
+    backendRecommendOkRef.current = false
+    const turnId = ++assistantTurnIdRef.current
+
+    void (async () => {
+      try {
+        const response = await recommendFromMessage(combinedMessage)
+        if (turnId !== assistantTurnIdRef.current) return
+        console.log("[CareerFinder.ai] /recommend response", response)
+        const latestProfile = toStudentProfile(response.profile)
+        backendProfileRef.current = latestProfile
+        backendRecommendationsRef.current = toRecommendations(
+          response.recommendations,
+        )
+        backendRecommendOkRef.current = true
+        // Merge latest parse into accumulated session profile.
+        mergedProfileRef.current = mergeStudentProfiles(
+          mergedProfileRef.current,
+          latestProfile,
+        )
+        // Persist anonymous session to localStorage.
+        saveAnonymousChatSession({
+          userMessages: userMessagesRef.current,
+          profile: mergedProfileRef.current,
+          updatedAt: new Date().toISOString(),
+        })
+      } catch (error) {
+        if (turnId !== assistantTurnIdRef.current) return
+        console.error("[CareerFinder.ai] /recommend failed", error)
+        backendRecommendOkRef.current = false
+      }
+    })()
+
     setEntries((prev) => [
       ...prev,
       { id: uid(), role: "user", content: userText },
@@ -178,14 +335,26 @@ export function CareerChat() {
       window.clearTimeout(assistantTimeoutRef.current)
     }
 
-    const turnId = ++assistantTurnIdRef.current
-
     assistantTimeoutRef.current = window.setTimeout(() => {
       assistantTimeoutRef.current = null
 
       if (turnId !== assistantTurnIdRef.current) return
 
       setLoading(false)
+
+      const applyBackendShelfIfReady = () => {
+        if (!backendRecommendOkRef.current) return
+        const profile = backendProfileRef.current
+        const recs = backendRecommendationsRef.current
+        if (!profile || recs.length === 0) return
+        const shelfMemories = buildShelfMemoriesFromRecommendations(
+          recs,
+          profile,
+        )
+        if (shelfMemories.length === 0) return
+        setSavedShelfMemoriesOldestFirst(shelfMemories)
+        setNewestShelfMemoryId(shelfMemories[shelfMemories.length - 1]!.id)
+      }
 
       if (!finalizeGateOpen.current) {
         assistantsRemaining.current -= 1
@@ -197,12 +366,16 @@ export function CareerChat() {
 
           const id = uid()
 
+          const backendRec = backendRecommendationsRef.current[0]
           const rec =
+            backendRec ??
             mockRecommendations[
               offerIndexRef.current % mockRecommendations.length
             ]
 
-          offerIndexRef.current += 1
+          if (!backendRec) {
+            offerIndexRef.current += 1
+          }
 
           setEntries((prev) => [
             ...prev,
@@ -220,16 +393,38 @@ export function CareerChat() {
             },
           ])
 
+          applyBackendShelfIfReady()
+
           return
         }
       }
 
+      // Use the accumulated merged profile for both display and reply logic.
+      // Falls back to the raw latest-turn profile if merge hasn't resolved yet.
+      const parsedProfile =
+        mergedProfileRef.current ?? backendProfileRef.current ?? undefined
+
+      const replyText = buildAssistantReply({
+        profile: parsedProfile,
+        recommendations: backendRecommendationsRef.current,
+        backendSucceeded: backendRecommendOkRef.current,
+        userText,
+      })
+
       setEntries((prev) => [
         ...prev,
-        { id: uid(), role: "assistant", variant: "standard" },
+        {
+          id: uid(),
+          role: "assistant",
+          variant: "standard",
+          parsedProfile,
+          replyText,
+        },
       ])
+
+      applyBackendShelfIfReady()
     }, ASSISTANT_LOAD_MIN_MS)
-  }, [])
+  }, [setNewestShelfMemoryId, setSavedShelfMemoriesOldestFirst])
 
   const send = useCallback(() => {
     const text = input.trim()
@@ -277,6 +472,18 @@ export function CareerChat() {
     finalizeGateOpen.current = false
 
     offerIndexRef.current = 0
+
+    backendRecommendationsRef.current = []
+
+    backendProfileRef.current = null
+
+    backendRecommendOkRef.current = false
+
+    userMessagesRef.current = []
+
+    mergedProfileRef.current = null
+
+    clearAnonymousChatSession()
 
     textareaRef.current?.focus()
   }
@@ -448,7 +655,7 @@ export function CareerChat() {
   )
 
   const centerColumn = (
-    <div className="relative flex min-h-0 w-full min-w-0 flex-1 basis-0 flex-col overflow-hidden pb-48 md:pb-52">
+    <div className="relative flex min-h-0 w-full min-w-0 flex-1 basis-0 flex-col overflow-hidden">
       <div
         ref={messagesScrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -461,7 +668,7 @@ export function CareerChat() {
             <div className="h-[min(520px,calc(100vh-320px))] w-full max-w-2xl md:max-w-3xl" />
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 pb-20 pt-2 md:max-w-3xl md:pb-24 md:pt-3">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 pb-40 pt-2 md:max-w-3xl md:pb-44 md:pt-3">
             {entries.map((entry) =>
               entry.role === "user" ? (
                 <div key={entry.id} className="flex justify-end">
@@ -470,10 +677,19 @@ export function CareerChat() {
                   </div>
                 </div>
               ) : entry.variant === "standard" ? (
-                <div key={entry.id} className="flex justify-start">
-                  <div className="max-w-[min(100%,28rem)] rounded-3xl bg-muted px-4 py-3 text-sm leading-relaxed text-foreground shadow-sm">
-                    {ASSISTANT_TURN_REPLY}
+                <div key={entry.id} className="flex flex-col gap-3">
+                  <div className="flex justify-start">
+                    <div className="max-w-[min(100%,28rem)] rounded-3xl bg-muted px-4 py-3 text-sm leading-relaxed text-foreground shadow-sm">
+                      {entry.replyText}
+                    </div>
                   </div>
+                  {entry.parsedProfile ? (
+                    <ParsedProfileCard
+                      profile={entry.parsedProfile}
+                      compact
+                      className="max-w-[min(100%,28rem)]"
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <div key={entry.id} className="flex flex-col gap-3">

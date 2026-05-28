@@ -71,6 +71,18 @@ function sideMemoriesFlattenForStrip(rows: CareerFitMemory[][]): CareerFitMemory
   return rows.flatMap((stack) => [...stack].reverse())
 }
 
+function shelfMemoryBackProps(memory: CareerFitMemory) {
+  return {
+    roleCluster: memory.roleCluster,
+    city: memory.city,
+    workMode: memory.workMode,
+    programType: memory.programType,
+    interviewRequired: memory.interviewRequired,
+    missingSkills: memory.missingSkills,
+    sourceUrl: memory.sourceUrl,
+  }
+}
+
 export function CareerFitShelf({
   side,
   globalSavedOldestFirst,
@@ -307,6 +319,7 @@ export function CareerFitShelf({
               layout="strip"
               animateEnter={memory.id === newestId}
               loadingSkeleton={searchLoading}
+              {...shelfMemoryBackProps(memory)}
             />
           </div>
         ))}
@@ -426,6 +439,7 @@ export function CareerFitShelf({
                         layout="stack"
                         animateEnter={memory.id === newestId}
                         loadingSkeleton={searchLoading && isFront}
+                        {...shelfMemoryBackProps(memory)}
                       />
                     </div>
                   )

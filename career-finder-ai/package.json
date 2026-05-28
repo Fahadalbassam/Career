@@ -1,0 +1,8 @@
+{
+  "name": "career-finder-ai",
+  "private": true,
+  "scripts": {
+    "run:terminal": "powershell -ExecutionPolicy Bypass -File scripts/run-terminal.ps1",
+    "run:full": "powershell -ExecutionPolicy Bypass -File scripts/run-full.ps1"
+  }
+}

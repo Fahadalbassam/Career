@@ -28,6 +28,13 @@ export type FitShelfWidgetProps = {
   animateEnter?: boolean
   /** Pulse placeholders on the metal face (search in-flight). */
   loadingSkeleton?: boolean
+  roleCluster?: string
+  city?: string
+  workMode?: string
+  programType?: string
+  interviewRequired?: string
+  missingSkills?: string[]
+  sourceUrl?: string
 }
 
 export function FitShelfWidget({
@@ -43,6 +50,13 @@ export function FitShelfWidget({
   className,
   animateEnter,
   loadingSkeleton = false,
+  roleCluster,
+  city,
+  workMode,
+  programType,
+  interviewRequired,
+  missingSkills,
+  sourceUrl,
 }: FitShelfWidgetProps) {
   const [hovered, setHovered] = useState(false)
   const [flipped, setFlipped] = useState(false)
@@ -119,6 +133,14 @@ export function FitShelfWidget({
   const tiltTransform = tiltFree ? "rotateY(0deg)" : `rotateY(${defaultTiltY}deg)`
 
   const tagRow = tags.slice(0, 3)
+
+  const metaParts = [roleCluster, city, workMode, programType].filter(
+    (part): part is string => Boolean(part?.trim()),
+  )
+  const metaLine = metaParts.join(" · ")
+  const missingRow = missingSkills?.slice(0, 3) ?? []
+  const interviewLine = interviewRequired?.trim()
+  const applyUrl = sourceUrl?.trim()
 
   return (
     <div
@@ -266,6 +288,39 @@ export function FitShelfWidget({
             <p className="mt-2 min-h-0 flex-1 basis-0 overflow-y-auto text-[10px] font-semibold leading-relaxed tracking-tight text-black [overflow-wrap:anywhere] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mt-3 sm:text-[11px]">
               {details}
             </p>
+            {metaLine ? (
+              <p className="mt-1.5 shrink-0 text-[9px] font-bold uppercase tracking-wide text-neutral-600 sm:text-[10px]">
+                {metaLine}
+              </p>
+            ) : null}
+            {interviewLine ? (
+              <p className="mt-1 shrink-0 text-[10px] font-semibold text-black sm:text-[11px]">
+                Interview: {interviewLine}
+              </p>
+            ) : null}
+            {missingRow.length > 0 ? (
+              <div className="mt-1.5 flex shrink-0 flex-wrap gap-1">
+                {missingRow.map((skill) => (
+                  <span
+                    key={skill}
+                    className="rounded border border-black/20 bg-neutral-50 px-1.5 py-0.5 text-[9px] font-bold text-black sm:text-[10px]"
+                  >
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {applyUrl ? (
+              <a
+                href={applyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex shrink-0 text-[10px] font-extrabold text-black underline underline-offset-2 hover:text-neutral-700 sm:text-[11px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Open posting →
+              </a>
+            ) : null}
             {tags.length > 0 ? (
               <div className="mt-2 flex shrink-0 flex-nowrap gap-1 overflow-hidden border-t border-black/10 pt-2 sm:mt-2 sm:gap-1 sm:pt-2">
                 {tags.slice(0, 3).map((tag) => (

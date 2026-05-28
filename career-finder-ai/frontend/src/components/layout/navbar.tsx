@@ -4,11 +4,10 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 
 import type { MouseEvent as ReactMouseEvent } from "react"
-import { useState } from "react"
 
+import { useAuth } from "@/components/auth/auth-provider"
 import { useOptionalCareerChrome } from "@/components/career/career-nav-context"
 import { useHomeExitToChat } from "@/components/home/home-exit-to-chat-context"
-import { LoginCardDialog } from "@/components/layout/login-card-dialog"
 import { cn } from "@/lib/utils"
 
 const navItems = [
@@ -27,7 +26,17 @@ export function Navbar() {
 
   const homeExit = useHomeExitToChat()
 
-  const [loginOpen, setLoginOpen] = useState(false)
+  const { user, logout, isLoading: authLoading } = useAuth()
+
+  async function handleLogout() {
+    await logout()
+    router.push("/")
+  }
+
+  const userLabel =
+    user?.displayName?.trim() ||
+    user?.email?.split("@")[0] ||
+    "Account"
 
   async function interceptCareerNavigate(
     href: string,
@@ -129,16 +138,33 @@ export function Navbar() {
             )
           })}
         </nav>
-        <button
-          type="button"
-          className="brand-name shrink-0 cursor-pointer border-0 bg-transparent text-base font-semibold tracking-tight text-foreground underline-offset-4 transition-colors hover:text-primary focus-visible:underline focus-visible:outline-none sm:text-lg"
-          onClick={() => setLoginOpen(true)}
-        >
-          login
-        </button>
+        {user ? (
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <span
+              className="max-w-[8rem] truncate text-sm font-medium text-foreground sm:max-w-[10rem] sm:text-base"
+              title={user.email}
+            >
+              {userLabel}
+            </span>
+            <button
+              type="button"
+              className="brand-name shrink-0 cursor-pointer border-0 bg-transparent text-sm font-semibold tracking-tight text-muted-foreground underline-offset-4 transition-colors hover:text-primary focus-visible:underline focus-visible:outline-none sm:text-base"
+              disabled={authLoading}
+              onClick={() => void handleLogout()}
+            >
+              logout
+            </button>
+          </div>
+        ) : (
+          <Link
+            href="/login"
+            className="brand-name shrink-0 text-base font-semibold tracking-tight text-foreground underline-offset-4 transition-colors hover:text-primary focus-visible:underline sm:text-lg"
+          >
+            login
+          </Link>
+        )}
       </div>
     </header>
-    <LoginCardDialog open={loginOpen} onOpenChange={setLoginOpen} />
     </>
   )
 }

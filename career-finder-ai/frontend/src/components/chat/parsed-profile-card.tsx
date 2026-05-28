@@ -74,11 +74,11 @@ export function ParsedProfileCard({
         </CardTitle>
         {compact ? (
           <p className="text-[11px] leading-snug text-muted-foreground">
-            Fields inferred for ranking (mock).
+            Fields inferred from your chat message.
           </p>
         ) : (
           <CardDescription>
-            Structured fields inferred from your conversation (mock preview).
+            Structured fields inferred from your conversation.
           </CardDescription>
         )}
       </CardHeader>

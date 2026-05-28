@@ -325,3 +325,160 @@ def test_parse_combined_extended_profile():
     assert profile.preferred_locations == ["Riyadh", "Dammam"]
     assert "Software Engineer" in profile.preferred_roles
     assert profile.interview_preference == "No interview preferred"
+
+
+# ---------------------------------------------------------------------------
+# ML-2A: taxonomy-backed parser improvements
+# ---------------------------------------------------------------------------
+
+# City aliases ---------------------------------------------------------------
+
+def test_parse_alkhobar_normalises_to_khobar():
+    profile = parse_message("I live in alkhobar and study CS")
+    assert profile.city == "Khobar"
+
+
+def test_parse_al_khobar_with_space_normalises_to_khobar():
+    profile = parse_message("CS student based in al khobar")
+    assert profile.city == "Khobar"
+
+
+def test_parse_al_khobar_with_hyphen_normalises_to_khobar():
+    profile = parse_message("Looking for COOP in al-khobar")
+    assert profile.city == "Khobar"
+
+
+def test_parse_jedda_normalises_to_jeddah():
+    profile = parse_message("DS student in jedda")
+    assert profile.city == "Jeddah"
+
+
+def test_parse_ad_dammam_normalises_to_dammam():
+    profile = parse_message("CS student in ad dammam looking for COOP")
+    assert profile.city == "Dammam"
+
+
+def test_parse_remote_alone_is_not_picked_as_city():
+    """Work-mode word 'remote' must not poison primary-city detection."""
+    profile = parse_message("I prefer remote work")
+    assert profile.city is None
+    assert profile.work_mode == "Remote"
+
+
+# Interest detection ---------------------------------------------------------
+
+def test_parse_security_focused_maps_to_cybersecurity():
+    profile = parse_message("Looking for security focused opportunities")
+    assert profile.interest == "Cybersecurity"
+
+
+def test_parse_cyber_security_phrase_maps_to_cybersecurity_interest():
+    profile = parse_message("I want cyber security roles")
+    assert profile.interest == "Cybersecurity"
+
+
+def test_parse_cs_student_with_security_focus_overrides_default_interest():
+    """Explicit interest from text must override the CS major default."""
+    profile = parse_message(
+        "I am a CS student looking for security focused opportunities"
+    )
+    assert profile.major == "CS"
+    assert profile.interest == "Cybersecurity"
+
+
+def test_parse_cs_student_in_alkhobar_with_security_focus():
+    profile = parse_message(
+        "I am a CS student in alkhobar looking for security focused opportunities"
+    )
+    assert profile.major == "CS"
+    assert profile.city == "Khobar"
+    assert profile.interest == "Cybersecurity"
+    # Cluster fallback should seed preferred_roles when no explicit role is named.
+    assert "Cybersecurity" in profile.preferred_roles
+    assert "SOC Analyst" in profile.preferred_roles
+    assert "Network Security" in profile.preferred_roles
+    assert "Penetration Testing" in profile.preferred_roles
+
+
+def test_parse_dev_ops_maps_to_cloud_devops_interest():
+    profile = parse_message("I want cloud infrastructure or dev ops")
+    assert profile.interest == "Cloud / DevOps"
+
+
+def test_parse_cloud_infrastructure_maps_to_cloud_devops_interest():
+    profile = parse_message("Looking for cloud infrastructure roles")
+    assert profile.interest == "Cloud / DevOps"
+
+
+# Skill aliases --------------------------------------------------------------
+
+def test_parse_pen_testing_alias_maps_to_penetration_testing_skill():
+    profile = parse_message("I know Linux and pen testing")
+    assert "penetration testing" in profile.skills
+
+
+def test_parse_k8s_alias_maps_to_kubernetes_skill():
+    profile = parse_message("Experience with k8s and docker")
+    assert "kubernetes" in profile.skills
+
+
+def test_parse_dev_ops_alias_maps_to_devops_skill():
+    profile = parse_message("I have dev ops experience")
+    assert "devops" in profile.skills
+
+
+def test_parse_infosec_alias_maps_to_cybersecurity_skill():
+    profile = parse_message("Strong infosec background and Linux skills")
+    assert "cybersecurity" in profile.skills
+    assert "linux" in profile.skills
+
+
+def test_parse_cicd_alias_maps_to_cicd_skill():
+    profile = parse_message("I have CI CD pipeline experience")
+    assert "cicd" in profile.skills
+
+
+def test_parse_security_related_skills_persist_as_skills():
+    profile = parse_message(
+        "I know Linux, networking, Docker, and penetration testing"
+    )
+    for expected in ("linux", "networking", "docker", "penetration testing"):
+        assert expected in profile.skills
+
+
+# Preferred-roles cluster seeding -------------------------------------------
+
+def test_parse_explicit_role_keeps_priority_over_interest_cluster():
+    """Existing role detection (SOC Analyst) should not be replaced by cluster seeding."""
+    profile = parse_message("Interested in SOC analyst roles")
+    assert "SOC Analyst" in profile.preferred_roles
+
+
+def test_parse_devops_interest_seeds_cloud_devops_cluster_roles():
+    profile = parse_message("I want cloud infrastructure or dev ops")
+    assert profile.interest == "Cloud / DevOps"
+    # No explicit "DevOps Engineer" / "Cloud Engineer" phrase in input,
+    # so cluster fallback should fire.
+    assert "Cloud / DevOps" in profile.preferred_roles
+
+
+# ---------------------------------------------------------------------------
+# ML-2B parser regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_ml2b_security_focused_still_maps_to_cybersecurity():
+    profile = parse_message("I want security focused opportunities")
+    assert profile.interest == "Cybersecurity"
+
+
+def test_parse_ml2b_alkhobar_still_normalises_to_khobar():
+    profile = parse_message("I am a CS student in alkhobar")
+    assert profile.city == "Khobar"
+
+
+def test_parse_ml2b_i_want_role_in_devops_maps_to_cloud_devops():
+    profile = parse_message("I want role in DevOps")
+    assert profile.interest == "Cloud / DevOps"
+    assert "devops" in profile.skills
+    assert "Cloud / DevOps" in profile.preferred_roles

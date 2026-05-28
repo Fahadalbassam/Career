@@ -13,7 +13,12 @@ from __future__ import annotations
 import re
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+from app.opportunity_enrichment import enrich_opportunity_signals
 from app.schemas import Opportunity, ParsedProfile
+from app.taxonomy import (
+    INTEREST_OPPORTUNITY_KEYWORDS,
+    opportunity_keywords_for_interest,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +291,26 @@ def compute_major_fit_score(profile: ParsedProfile, opportunity: Opportunity) ->
 
 
 def compute_skill_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
+    """Skill match score in [0, 1].
+
+    ML-2B / ML-2B.1: layered match. Per-token weights:
+
+    * **Explicit hit** — token appears in the opportunity's title /
+      requirements / declared ``skills_list`` / inferred role cluster.
+      ``1.0`` per token.
+    * **Inferred required hit** (ML-2B.1) — token only appears in the
+      role profile's ``required_skills`` for this opportunity. ``0.7``.
+    * **Generic inferred hit** — token only appears in the bucket-derived
+      ``inferred_skills`` pool. ``0.5``.
+    * **Inferred preferred hit** (ML-2B.1) — token only appears in the
+      role profile's ``preferred_skills``. ``0.4``.
+
+    Required is checked before generic, generic before preferred, so a
+    token that is both "required for this role" and a generic inferred
+    skill counts as required (0.7). Final score is the per-token average,
+    clamped to ``[0, 1]`` by the rubric's downstream code. ``TARGET_WEIGHTS``
+    is unchanged.
+    """
     if not profile.skills and not profile.qualifications:
         return 0.4
 
@@ -294,7 +319,22 @@ def compute_skill_match_score(profile: ParsedProfile, opportunity: Opportunity) 
     if not tokens:
         return 0.4
 
-    matched = sum(1 for token in tokens if token in searchable)
+    signals = enrich_opportunity_signals(opportunity)
+    required_blob = normalize_text(" ".join(signals.get("required_skills", []) or []))   # type: ignore[arg-type]
+    preferred_blob = normalize_text(" ".join(signals.get("preferred_skills", []) or [])) # type: ignore[arg-type]
+    inferred_blob = normalize_text(" ".join(signals.get("inferred_skills", []) or []))   # type: ignore[arg-type]
+
+    matched = 0.0
+    for token in tokens:
+        if token in searchable:
+            matched += 1.0
+        elif required_blob and token in required_blob:
+            matched += 0.7
+        elif inferred_blob and token in inferred_blob:
+            matched += 0.5
+        elif preferred_blob and token in preferred_blob:
+            matched += 0.4
+
     return matched / len(tokens)
 
 
@@ -314,6 +354,26 @@ def _role_family_for_token(token: str) -> Optional[str]:
 
 
 def compute_role_interest_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
+    """Score how well an opportunity matches the student's role/interest signals.
+
+    Strategy (ordered, first match wins):
+
+    1. Direct token match — the student's interest or preferred role text
+       appears verbatim in the opportunity text / role cluster.
+    2. ROLE_EXACT_KEYWORDS overlap — both sides reference the same canonical
+       role family (e.g. "soc analyst").
+    3. Interest cluster match — the student's interest is in the ML-2A
+       taxonomy and the opportunity contains one of its cluster keywords
+       (e.g. ``interest="Cybersecurity"`` -> matches "soc", "network security",
+       "incident response", ...). Returns ``0.8`` for cluster hits via the
+       opportunity title/role cluster, ``0.6`` when the hit is only in the
+       skills_list (partial match).
+    4. Role family overlap — looser family-level match. Returns ``0.6``.
+    5. Generic technical fallback — opportunity mentions any generic
+       technical term. Returns ``0.3`` so a cybersecurity-focused student
+       does not get over-boosted on a plain software listing.
+    6. Zero otherwise.
+    """
     role_text = _opportunity_search_text(opportunity)
     role_cluster = normalize_text(infer_role_cluster(opportunity))
     profile_roles = _role_tokens(profile)
@@ -332,6 +392,19 @@ def compute_role_interest_score(profile: ParsedProfile, opportunity: Opportunity
                 if contains_any(role, keywords):
                     return 1.0
 
+    # ML-2A: interest cluster match via taxonomy.
+    interest_keywords = opportunity_keywords_for_interest(profile.interest)
+    if interest_keywords:
+        title_and_cluster = normalize_text(
+            " ".join([opportunity.title, role_cluster])
+        )
+        if contains_any(title_and_cluster, interest_keywords):
+            return 0.8
+        if contains_any(role_text, interest_keywords):
+            # Hit was further down (requirements / skills_list); treat as a
+            # partial match per the ML-2A spec.
+            return 0.6
+
     profile_families = {
         family
         for role in profile_roles
@@ -345,6 +418,16 @@ def compute_role_interest_score(profile: ParsedProfile, opportunity: Opportunity
     }
     if profile_families & opp_families:
         return 0.6
+
+    # ML-2B: weak inferred-interest match. When the opportunity has no
+    # explicit role/cluster keywords for the user's interest, fall back to
+    # the runtime enrichment layer. A hit here is treated as a weak signal
+    # (0.5) so it can lift a near-miss but never overrule an explicit
+    # cluster match (0.8) or a direct token match (1.0).
+    if profile.interest:
+        inferred = enrich_opportunity_signals(opportunity)["inferred_interests"]
+        if profile.interest in inferred:  # type: ignore[operator]
+            return 0.5
 
     if any(term in role_text for term in GENERIC_TECHNICAL_TERMS):
         return 0.3
@@ -530,38 +613,121 @@ def score_profile_opportunity_pair(
     }
 
 
-def compute_missing_skills(
-    profile: ParsedProfile,
-    opportunity: Opportunity,
-) -> List[str]:
-    """Return opportunity skills the student does not appear to have.
+MISSING_SKILLS_MAX = 8
 
-    Rules:
-        - Case-insensitive comparison.
-        - Whitespace is stripped.
-        - "Not stated", "nan", "n/a", "none", and empty tokens are filtered out.
-        - Output preserves the original spelling from the opportunity.
-        - Duplicates are removed while preserving first-seen order.
-    """
-    student = {
+
+def _student_skill_set(profile: ParsedProfile) -> set[str]:
+    return {
         skill.strip().lower()
         for skill in (profile.skills or [])
         if skill and skill.strip().lower() not in SKILL_NOISE_TOKENS
     }
 
-    seen: set[str] = set()
-    missing: List[str] = []
-    for skill in opportunity.skills_list or []:
-        if not skill:
+
+def _append_missing(
+    candidates: Iterable[str],
+    student: set[str],
+    seen: set[str],
+    out: List[str],
+    max_count: int,
+) -> bool:
+    """Append non-redundant missing skills to ``out``.
+
+    Returns ``True`` when ``out`` reached ``max_count`` and the caller can
+    stop.
+    """
+    for raw in candidates:
+        if len(out) >= max_count:
+            return True
+        if not raw:
             continue
-        cleaned = str(skill).strip()
+        cleaned = str(raw).strip()
         normalized = cleaned.lower()
         if not normalized or normalized in SKILL_NOISE_TOKENS:
             continue
-        if normalized in student:
-            continue
-        if normalized in seen:
+        if normalized in student or normalized in seen:
             continue
         seen.add(normalized)
-        missing.append(cleaned)
-    return missing
+        out.append(cleaned)
+    return len(out) >= max_count
+
+
+def compute_missing_required_skills(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+    *,
+    max_count: int = MISSING_SKILLS_MAX,
+) -> List[str]:
+    """ML-2B.1: missing skills the role's profile lists as **required**.
+
+    Only role-profile required skills are considered; explicit
+    ``skills_list`` entries are handled by :func:`compute_missing_skills`.
+    """
+    student = _student_skill_set(profile)
+    signals = enrich_opportunity_signals(opportunity)
+    seen: set[str] = set()
+    out: List[str] = []
+    _append_missing(signals.get("required_skills", []) or [], student, seen, out, max_count)  # type: ignore[arg-type]
+    return out
+
+
+def compute_missing_preferred_skills(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+    *,
+    max_count: int = MISSING_SKILLS_MAX,
+) -> List[str]:
+    """ML-2B.1: missing skills the role's profile lists as **preferred**.
+
+    Preferred skills that are already in the required list (or that the
+    student already has) are filtered out.
+    """
+    student = _student_skill_set(profile)
+    signals = enrich_opportunity_signals(opportunity)
+    required_lower = {str(s).lower() for s in (signals.get("required_skills") or [])}  # type: ignore[arg-type]
+    seen: set[str] = set(required_lower)
+    out: List[str] = []
+    _append_missing(signals.get("preferred_skills", []) or [], student, seen, out, max_count)  # type: ignore[arg-type]
+    return out
+
+
+def compute_missing_skills(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+    *,
+    max_count: int = MISSING_SKILLS_MAX,
+) -> List[str]:
+    """Return opportunity skills the student does not appear to have.
+
+    ML-2B.1 ordering:
+
+    1. **Missing required** skills from the role profile (most important).
+    2. **Missing preferred** skills from the role profile.
+    3. **Remaining explicit** skills declared on the opportunity that
+       were not already covered by required / preferred.
+
+    Notes:
+        - Case-insensitive comparison; whitespace is stripped.
+        - Noise tokens ("Not stated", "nan", "n/a", "none", "") removed.
+        - Output preserves the original spelling for explicit entries and
+          uses the lowercase profile spelling for required / preferred.
+        - Duplicates are dropped (first-seen wins) so a skill that is both
+          explicit-required and profile-required appears only once.
+        - Capped at ``max_count`` (default ``MISSING_SKILLS_MAX = 8``).
+    """
+    student = _student_skill_set(profile)
+    signals = enrich_opportunity_signals(opportunity)
+
+    required = signals.get("required_skills", []) or []
+    preferred = signals.get("preferred_skills", []) or []
+    explicit = opportunity.skills_list or []
+
+    seen: set[str] = set()
+    out: List[str] = []
+
+    if _append_missing(required, student, seen, out, max_count):  # type: ignore[arg-type]
+        return out
+    if _append_missing(preferred, student, seen, out, max_count):  # type: ignore[arg-type]
+        return out
+    _append_missing(explicit, student, seen, out, max_count)
+    return out
