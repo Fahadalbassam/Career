@@ -460,3 +460,22 @@ def recommend_from_message(message: str, top_n: int = 5) -> RecommendResponse:
         recommendations=recommendations,
         total_candidates=total_candidates,
     )
+
+def recommend_with_metadata(
+    profile: ParsedProfile,
+    top_n: int = 5,
+) -> dict:
+    """
+    Return recommendations plus metadata for the API/frontend.
+
+    This keeps recommend() focused on ranking while giving the API
+    extra information such as the total number of available candidates.
+    """
+    candidates = get_candidates()
+    recommendations = recommend(profile, top_n=top_n)
+
+    return {
+        "profile": profile,
+        "recommendations": recommendations,
+        "total_candidates": len(candidates),
+    }
