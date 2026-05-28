@@ -443,3 +443,66 @@ cd career-finder-ai/frontend
 npm run lint
 npm run build
 ```
+
+---
+
+## FINAL-QA-1 — Robustness and recommendation quality sweep (2026-05-28)
+
+**What changed:** `tests/test_input_robustness.py` (new), `scripts/recommendation_quality_sweep.py` (new), `frontend/e2e/smoke.spec.ts` (+3 chat robustness tests), reports under `docs/reports/`.
+
+### Backend
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_cli_ml_commands.py tests/test_input_robustness.py -q
+```
+
+**Result:** **185 passed** in ~21s.
+
+### Recommendation quality sweep
+
+```bash
+cd career-finder-ai
+python scripts/recommendation_quality_sweep.py
+```
+
+**Result:** `docs/reports/final_recommendation_quality_sweep.md` — **8 Pass, 2 Review, 0 Fail**.
+
+### Playwright
+
+```bash
+cd career-finder-ai/frontend
+npm run test:e2e
+npx playwright test e2e/smoke.spec.ts --headed --project=chromium
+```
+
+**Result:** **11 / 11 passed** (headless ~32s; headed ~21s).
+
+**New e2e tests:**
+
+| Test | Behaviour |
+|---|---|
+| handles accidental tiny input | `/chat` + `n` — no crash; assistant/profile prompt visible |
+| handles vague internship input | `I need internship` — assistant or parsed profile |
+| handles complete cybersecurity Khobar COOP | full message — recommendation/profile/shelf signal |
+
+### Frontend production
+
+```bash
+cd career-finder-ai/frontend
+npm run lint
+npm run build
+```
+
+**Result:** both **passed**.
+
+### Manual `/recommend` + ML shadow
+
+- `POST /recommend` with cybersecurity Khobar COOP message → 200, `major=CS`, `city=Khobar`, sorted rubric scores.
+- `CAREERFINDER_ENABLE_ML_SCORE=true` (direct Python): `ml_score` present, `score_source=rubric`, ranking unchanged.
+
+### Terminal CLI (piped demo)
+
+Guest → `/metrics` → `/model` → `/shadow` → accidental `n` → vague → complete profile → `/details 1` → `/exit`.
+
+**Result:** accidental ignored; vague asks for major; complete profile returns ~82% top matches; no crash.

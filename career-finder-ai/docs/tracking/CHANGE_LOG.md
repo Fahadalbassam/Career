@@ -685,3 +685,22 @@ egression_split_summary.json. Prints a readable terminal summary. Verifies: rati
 **What did NOT change.** No application code, no backend logic, no frontend UI, no ranking, no tests, no ML models.
 
 **Why.** QA-2 is complete. The project now has a full working prototype, ML pipeline, shadow scoring, and E2E tests. A technical guide is required for course report assembly, team onboarding, and evaluator review.
+
+---
+
+## 2026-05-28 — FINAL-QA-1 robustness and recommendation quality sweep
+
+**Where.** `tests/test_input_robustness.py` (new), `scripts/recommendation_quality_sweep.py` (new), `frontend/e2e/smoke.spec.ts`, `docs/reports/final_recommendation_quality_sweep.md`, `docs/reports/final_qa_sweep.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- Added **50 backend robustness tests** covering accidental/tiny, vague, partial, strong complete, and contradictory inputs; asserts no crash, rubric `score_source`, sorted `match_score`, and sensible profile extraction.
+- Added **`recommendation_quality_sweep.py`** — runs 10 curated scenarios and writes `docs/reports/final_recommendation_quality_sweep.md` (8 Pass, 2 Review, 0 Fail).
+- Extended **Playwright** with three chat robustness tests (accidental `n`, vague internship, complete cybersecurity Khobar COOP).
+- Wrote **`docs/reports/final_qa_sweep.md`** summarizing all commands, results, known issues, and final readiness verdict.
+
+**What did NOT change.** No changes to `parser.py`, `rubric.py`, `recommender.py`, ranking weights, models, or frontend UI layout. No model retraining.
+
+**Test results.** `pytest tests/test_parser.py tests/test_recommender.py tests/test_cli_ml_commands.py tests/test_input_robustness.py` → **185/185 passed**. `npm run test:e2e` → **11/11 passed**. Headed Playwright → **11/11 passed**. `npm run lint` / `npm run build` → pass. ML shadow with `CAREERFINDER_ENABLE_ML_SCORE=true`: `ml_score` attached, ranking still by `match_score`. Terminal demo: accidental guard, vague major prompt, complete profile recommendations.
+
+**Why.** Final course presentation / report gate: verify safe behaviour on weak input and honest recommendation quality without altering live ranking.

@@ -136,6 +136,83 @@ test.describe("CareerFinder.ai smoke", () => {
     ).toBeVisible()
   })
 
+  test.describe("chat input robustness", () => {
+    async function submitChatMessage(page: Page, text: string) {
+      await page.goto("/chat")
+      const composer = page.getByPlaceholder("Ask CareerFinder.ai…")
+      await expect(composer).toBeVisible()
+      await composer.fill(text)
+      await page.getByRole("button", { name: "Send message" }).click()
+    }
+
+    test("handles accidental tiny input without crash", async ({ page }) => {
+      test.setTimeout(90_000)
+      const collector = attachConsoleCollector(page)
+
+      await submitChatMessage(page, "n")
+
+      const main = page.locator("main")
+      await expect(main).toBeVisible({ timeout: 15_000 })
+
+      await expect(async () => {
+        const asksForMore = main.getByText(
+          /major|skills|city|profile|scanning|COOP|internship|personalised|personalized/i,
+        )
+        const userBubble = main.getByText("n", { exact: true })
+        const visible =
+          (await asksForMore.first().isVisible()) ||
+          (await userBubble.isVisible())
+        expect(visible).toBeTruthy()
+      }).toPass({ timeout: 45_000 })
+
+      collector.assertClean()
+    })
+
+    test("handles vague internship input", async ({ page }) => {
+      test.setTimeout(90_000)
+
+      await submitChatMessage(page, "I need internship")
+
+      const main = page.locator("main")
+      await expect(async () => {
+        const reply = main.getByText(
+          /major|skills|city|internship|COOP|profile|scanning|match/i,
+        )
+        const parsed = main.getByText("Parsed profile")
+        expect(
+          (await reply.first().isVisible()) || (await parsed.isVisible()),
+        ).toBeTruthy()
+      }).toPass({ timeout: 45_000 })
+    })
+
+    test("handles complete cybersecurity Khobar COOP input", async ({ page }) => {
+      test.setTimeout(90_000)
+
+      const message =
+        "I am a CS student in Khobar looking for cybersecurity COOP. I know Linux, networking, and penetration testing."
+
+      await submitChatMessage(page, message)
+
+      const main = page.locator("main")
+      await expect(async () => {
+        const userBubble = main.getByText(message, { exact: false })
+        const parsedProfile = main.getByText("Parsed profile")
+        const assistantReply = main.getByText(
+          /match|recommend|Khobar|cyber|security|shelf|profile/i,
+        )
+        const shelfCard = main.getByText(/Saved .+ to your shelf/i)
+
+        const visible =
+          (await userBubble.isVisible()) ||
+          (await parsedProfile.isVisible()) ||
+          (await assistantReply.first().isVisible()) ||
+          (await shelfCard.isVisible())
+
+        expect(visible).toBeTruthy()
+      }).toPass({ timeout: 45_000 })
+    })
+  })
+
   test("no console errors on key pages", async ({ page }) => {
     const routes = ["/", "/chat", "/search", "/methodology"] as const
     const collector = attachConsoleCollector(page)
