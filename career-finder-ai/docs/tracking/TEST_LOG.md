@@ -506,3 +506,61 @@ npm run build
 Guest → `/metrics` → `/model` → `/shadow` → accidental `n` → vague → complete profile → `/details 1` → `/exit`.
 
 **Result:** accidental ignored; vague asks for major; complete profile returns ~82% top matches; no crash.
+
+---
+
+## 2026-05-29 — FINAL-POLISH-1
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py tests/test_assistant_reply.py tests/test_cli_ml_commands.py -q
+```
+
+**Result:** **196 passed** in ~22s.
+
+```bash
+cd frontend
+npm run lint
+npm run build
+npm run test:e2e
+```
+
+**Result:** lint pass (0 errors); build pass; e2e pass (run after implementation).
+
+**Parser manual check (combined terminal conversation):** `parse_message` on six-turn Khobar cybersecurity script → `mongodb` in skills, `interview_preference=Interview preferred`, `work_mode=On-site`, `Security Operations` in `preferred_roles`.
+
+---
+
+## 2026-05-29 — SCORE-AUDIT-1
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py tests/test_assistant_reply.py tests/test_cli_ml_commands.py -q
+python scripts/debug_score_breakdown.py
+cd frontend
+npm run lint
+npm run build
+```
+
+**Result:** **202 passed** in ~24s. Debug script: rank #1 Bank Albilad **86%**; missing skills no longer include fundamentals when `cybersecurity` is on profile. Lint pass; build pass.
+
+**New tests:** `test_score_audit_*` in `test_recommender.py`; `test_assistant_uses_concrete_missing_skills_*` in `test_assistant_reply.py`.
+
+---
+
+## 2026-05-29 — FINAL-DEMO-LOCK-1
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py tests/test_assistant_reply.py tests/test_cli_ml_commands.py -q
+python scripts/debug_score_breakdown.py
+# Terminal demo (backend on :8000)
+python scripts/careerfinder_cli.py  # piped: guest → demo message → /details 1 → /exit
+cd frontend
+npm run lint
+npm run build
+```
+
+**Result:** **202 passed** in ~23s. Debug script: Bank Albilad **86%** rank #1; missing skills exclude fundamentals when `cybersecurity` present. Terminal capture: `docs/reports/final_demo_lock_capture.txt` — profile + top 5 (86/84/84/84/82) + `/details 1` with score breakdown. Lint pass; build pass.
+
+**E2E:** Not re-run in this lock pass (optional; prior FINAL-QA-1: 11/11 passed).

@@ -117,6 +117,8 @@ SKILL_KEYWORDS: List[str] = [
     "qa",
     "soc",
     "siem",
+    "mongodb",
+    "nosql",
     "infrastructure",
     "network security",
     "incident response",
@@ -134,6 +136,16 @@ ROLE_KEYWORDS: List[Tuple[str, List[str]]] = [
     ("AI Engineer", ["ai engineer"]),
     ("Cybersecurity Analyst", ["cybersecurity analyst"]),
     ("SOC Analyst", ["soc analyst"]),
+    ("Security Operations", [
+        "security developer operator",
+        "security developer",
+        "security operations engineer",
+        "security operations",
+        "security operator",
+    ]),
+    ("DevSecOps", ["devsecops", "dev sec ops", "devops security"]),
+    ("Security Engineering", ["security engineer", "infrastructure security"]),
+    ("Network Security", ["network security engineer"]),
     ("Network Engineer", ["network engineer"]),
     ("Cloud Engineer", ["cloud engineer"]),
     ("DevOps Engineer", ["devops engineer", "dev ops engineer"]),
@@ -190,13 +202,27 @@ INTEREST_KEYWORDS: List[Tuple[str, List[str]]] = [
 NO_INTERVIEW_PHRASES: List[str] = [
     "without interview",
     "no interview",
+    "prefer no interview",
+    "do not want an interview",
+    "don't want an interview",
     "accepts right away",
     "direct acceptance",
+]
+
+INTERVIEW_PREFERRED_PHRASES: List[str] = [
+    "i want an interview",
+    "want an interview",
+    "with interview",
+    "interview preferred",
+    "on-site interview",
+    "in person interview",
 ]
 
 INTERVIEW_OKAY_PHRASES: List[str] = [
     "interview is okay",
     "interview is ok",
+    "interview is fine",
+    "i can do interview",
     "i can do interviews",
     "interviews are okay",
     "interview okay",
@@ -248,7 +274,8 @@ def _normalize_text(message: str) -> str:
     # Normalize machine learning spacing (must run before skill-alias pass
     # so the canonical "machine learning" token is present for matching).
     text = re.sub(r"\bmachine[\s-]+learning\b", "machine learning", text)
-    text = re.sub(r"\bdevsecops\b", "devops", text)
+    text = re.sub(r"\bdevsecops\b", "devsecops", text)
+    text = re.sub(r"\bdev\s+sec\s+ops\b", "devsecops", text)
 
     # Delegate the rest of the skill aliases (dev ops, k8s, pen testing,
     # infosec, cicd, prompt testing, reactjs, ...) to the taxonomy module.
@@ -416,6 +443,10 @@ def _find_interview_preference(text: str) -> Optional[str]:
     for phrase in NO_INTERVIEW_PHRASES:
         if phrase in text:
             return "No interview preferred"
+
+    for phrase in INTERVIEW_PREFERRED_PHRASES:
+        if phrase in text:
+            return "Interview preferred"
 
     for phrase in INTERVIEW_OKAY_PHRASES:
         if phrase in text:

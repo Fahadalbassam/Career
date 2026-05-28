@@ -117,7 +117,7 @@ None blocking presentation. No code fixes required for crashes or ranking corrup
 | `docs/reports/final_qa_sweep.md` | **This report** |
 | `docs/tracking/*` | Updated for FINAL-QA-1 |
 
-**No changes** to `parser.py`, `rubric.py`, `recommender.py`, or frontend UI components beyond Playwright tests.
+**FINAL-POLISH-1 (2026-05-29):** `parser.py`, `taxonomy.py`, `assistant_reply.py`, `rubric.py`, CLI assistant copy, and minimal parsed-profile fields for roles/interview. Ranking remains rubric-based; no ML retraining.
 
 ---
 
@@ -126,7 +126,7 @@ None blocking presentation. No code fixes required for crashes or ranking corrup
 1. **Parser:** Explicit “my major is CS” can lose to earlier “cyber security” phrase (`major=CYS`). Document in methodology/limitations.
 2. **Parser:** “data science student” + “machine learning” may set `major=AI` while `interest=Data Science` (acceptable but worth noting).
 3. **Software COOP ranking:** Strong JS/React profile can surface generic IT/COOP titles at top — Review, not Fail.
-4. **Phase 4 tracker (T-013):** Dedicated `confidence.ts` follow-up module still pending; `buildAssistantReply` in chat already asks for missing fields.
+4. **Phase 4 tracker (T-013):** Dedicated `confidence.ts` follow-up module still pending; `buildAssistantReply` / `assistant_reply` now asks only for missing fields (FINAL-POLISH-1).
 5. **ML shadow in terminal `/details`:** Shows “not available” unless backend process started with `CAREERFINDER_ENABLE_ML_SCORE=true`.
 
 ---

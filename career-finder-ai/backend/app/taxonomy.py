@@ -369,6 +369,9 @@ SKILL_ALIASES: Dict[str, str] = {
     "ci cd": "cicd",
     "cicd": "cicd",
     "reactjs": "react",
+    "mongo db": "mongodb",
+    "mongo": "mongodb",
+    "nosql": "nosql",
 }
 
 

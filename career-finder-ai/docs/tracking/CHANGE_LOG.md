@@ -704,3 +704,55 @@ egression_split_summary.json. Prints a readable terminal summary. Verifies: rati
 **Test results.** `pytest tests/test_parser.py tests/test_recommender.py tests/test_cli_ml_commands.py tests/test_input_robustness.py` → **185/185 passed**. `npm run test:e2e` → **11/11 passed**. Headed Playwright → **11/11 passed**. `npm run lint` / `npm run build` → pass. ML shadow with `CAREERFINDER_ENABLE_ML_SCORE=true`: `ml_score` attached, ranking still by `match_score`. Terminal demo: accidental guard, vague major prompt, complete profile recommendations.
 
 **Why.** Final course presentation / report gate: verify safe behaviour on weak input and honest recommendation quality without altering live ranking.
+
+---
+
+## 2026-05-29 — FINAL-POLISH-1 parser and assistant response polish
+
+**Where.** `backend/app/parser.py`, `backend/app/taxonomy.py`, `backend/app/assistant_reply.py` (new), `backend/app/rubric.py`, `scripts/careerfinder_cli.py`, `frontend/src/lib/assistant-reply.ts` (new), `frontend/src/components/chat/career-chat.tsx`, `frontend/src/components/chat/parsed-profile-card.tsx`, `tests/test_parser.py`, `tests/test_assistant_reply.py` (new).
+
+**What changed.**
+
+- Parser recognises **MongoDB** / NoSQL aliases, **security role** phrases (Security Operations, DevSecOps, Security Engineering, Network Security), and **interview preference** (`Interview preferred`, `No interview preferred`, `Interview okay`) including “i want an interview, in person” (work mode → On-site).
+- Shared **`assistant_reply`** module: assistant only asks for fields still missing; at strong match (≥80) with a complete profile, suggests concrete skill gaps (e.g. Linux, SIEM for cybersecurity) instead of repeating “add preferred role, work mode, or interview preference”.
+- CLI compact/full profile shows **preferred roles** and **interview preference** when present; assistant block prints Top match / Next best action lines.
+- Rubric adds small **Interview preferred** handling in existing `interview_score` component; security role keywords for role/interest matching.
+- Parsed profile card shows roles and interview preference when available (minimal UI addition).
+
+**What did NOT change.** No ML retraining, no ranking weight overhaul, no frontend redesign, no dataset pipeline changes.
+
+**Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml) → **196 passed**.
+
+---
+
+## 2026-05-29 — SCORE-AUDIT-1 cybersecurity profile score audit
+
+**Where.** `backend/app/rubric.py`, `backend/app/assistant_reply.py`, `scripts/debug_score_breakdown.py` (new), `scripts/careerfinder_cli.py`, `frontend/src/lib/assistant-reply.ts`, `tests/test_recommender.py`, `tests/test_assistant_reply.py`, `docs/reports/score_audit.md` (new).
+
+**What changed.**
+
+- Audited complete Khobar cybersecurity COOP profile: top match **Bank Albilad 86%** is explainable (location 0.5, skill fit 0.6, interview not stated 0.55).
+- **Bug fix:** `compute_missing_skills` no longer lists `cybersecurity fundamentals` / `security fundamentals` when the student already has `cybersecurity` (`_student_covers_skill` alias/prefix rules). **Does not change `match_score`.**
+- Assistant reply uses top recommendation `missing_skills` with `/details 1` wording instead of generic “more technical skills”.
+- CLI `/details` prints compact score breakdown when `score_breakdown` is present.
+- Audit script `python scripts/debug_score_breakdown.py` for reproducibility.
+
+**What did NOT change.** `TARGET_WEIGHTS`, ranking strategy, ML models, UI layout.
+
+**Test results.** `pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py tests/test_assistant_reply.py tests/test_cli_ml_commands.py` → **202/202 passed**. `npm run lint` / `npm run build` → pass.
+
+---
+
+## 2026-05-29 — FINAL-DEMO-LOCK-1 final demo/report lock
+
+**Where.** `docs/reports/final_demo_script.md` (new), `docs/reports/final_demo_lock_capture.txt` (new), `README.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- Ran terminal demo with the canonical Khobar cybersecurity COOP input; verified profile fields, top-5 sort by `match_score`, and `/details 1` (breakdown, matched/missing skills, reasons; no false `cybersecurity fundamentals` gap).
+- Added presentation script with professor Q&A, 86% explanation, rubric vs ML talking points, and frontend-failure backup plan.
+- Updated root `README.md` project summary, features, and architecture diagram to state rubric-primary ranking and optional ML shadow (removed outdated “ML fit classifier” live-path wording).
+
+**What did NOT change.** No rubric weights, ranking strategy, ML retrain, UI redesign, or new product features.
+
+**Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml) → **202/202 passed**. `npm run lint` / `npm run build` → pass.

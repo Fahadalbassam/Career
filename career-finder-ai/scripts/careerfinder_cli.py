@@ -39,6 +39,17 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Literal
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_BACKEND_DIR = _REPO_ROOT / "backend"
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.assistant_reply import (  # noqa: E402
+    build_assistant_reply as _build_assistant_reply,
+    build_assistant_reply_parts,
+    format_assistant_reply,
+)
+
 API_BASE = os.environ.get("CAREERFINDER_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 
 OutputMode = Literal["compact", "verbose", "split"]
@@ -528,69 +539,21 @@ def show_loading_pattern(label: str = "Analyzing profile") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Assistant reply (existing logic; unchanged contract)
+# Assistant reply (delegates to app.assistant_reply)
 # ---------------------------------------------------------------------------
 
 def build_assistant_reply(
     profile: dict[str, Any], recommendations: list[dict[str, Any]]
 ) -> str:
-    if is_missing(profile.get("major")):
-        return (
-            "I still need your major to rank opportunities correctly. "
-            "Are you CS, AI, CYS, CIS, DS, DE, CE, or FinTech?"
-        )
+    return _build_assistant_reply(profile, recommendations)
 
-    skills = profile.get("skills") or []
-    if not skills:
-        return (
-            "Tell me a few technical skills you have used, such as Python, SQL, Linux, "
-            "networking, React, Docker, cloud, cybersecurity, or machine learning."
-        )
 
-    preferred = profile.get("preferred_locations") or []
-    if is_missing(profile.get("city")) and not preferred:
-        return (
-            "Which city or preferred location should I prioritise? "
-            "For example Riyadh, Jeddah, Dammam, Khobar, Dhahran, remote, or multiple."
-        )
-
-    if is_missing(profile.get("program_type")):
-        return "Are you looking for COOP, internship, Tamheer, or general training?"
-
-    if is_missing(profile.get("work_mode")):
-        return "Do you prefer remote, hybrid, or on-site opportunities?"
-
-    top_rec = recommendations[0] if recommendations else None
-    top_score = int(top_rec.get("match_score", 0)) if top_rec else 0
-
-    if recommendations and top_score >= 85:
-        company = top_rec.get("company", "Unknown")
-        title = top_rec.get("title", "role")
-        return (
-            f"Strong match found. Your top recommendation is {company} — {title} "
-            f"at {top_score}% match."
-        )
-
-    if recommendations and top_score >= 70:
-        company = top_rec.get("company", "Unknown")
-        title = top_rec.get("title", "role")
-        return (
-            f"I found good matches, but I can improve the ranking if you add more details "
-            f"like preferred role, work mode, or interview preference. "
-            f"Top match: {company} — {title}, {top_score}%."
-        )
-
-    if recommendations:
-        return (
-            "I found some early matches, but confidence is still low. "
-            "Add your preferred role, city, work mode, or stronger technical skills "
-            "to improve the score."
-        )
-
-    return (
-        "I'm scanning Saudi COOP and internship options. "
-        "Share your major, city, skills, or preferred work mode to get a personalised ranking."
-    )
+def format_assistant_block(
+    profile: dict[str, Any], recommendations: list[dict[str, Any]]
+) -> str:
+    """Format assistant output with optional Top match / Next action lines."""
+    parts = build_assistant_reply_parts(profile, recommendations)
+    return format_assistant_reply(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +686,13 @@ def _profile_field_lines(profile: dict[str, Any], compact: bool) -> list[str]:
     if skills:
         lines.append(f"  Skills: {_fmt_list(skills)}")
 
+    roles = profile.get("preferred_roles") or []
+    if roles:
+        lines.append(f"  Preferred roles: {_fmt_list(roles)}")
+    interview = profile.get("interview_preference")
+    if not is_missing(interview):
+        lines.append(f"  Interview pref.: {interview}")
+
     if not compact:
         preferred = profile.get("preferred_locations") or []
         if preferred:
@@ -730,13 +700,6 @@ def _profile_field_lines(profile: dict[str, Any], compact: bool) -> list[str]:
         quals = profile.get("qualifications") or []
         if quals:
             lines.append(f"  Qualifications: {_fmt_list(quals)}")
-        roles = profile.get("preferred_roles") or []
-        if roles:
-            lines.append(f"  Preferred roles: {_fmt_list(roles)}")
-        interview = profile.get("interview_preference")
-        if not is_missing(interview):
-            lines.append(f"  Interview pref.: {interview}")
-
     if not lines and compact:
         lines.append("  (no fields parsed yet)")
     return lines
@@ -918,6 +881,34 @@ def print_recommendations_verbose(
     _safe_print("\n--------------------------------\n")
 
 
+_SCORE_BREAKDOWN_LABELS: dict[str, str] = {
+    "major_fit_score": "Major fit",
+    "city_match_score": "Location fit",
+    "program_type_score": "Program fit",
+    "work_mode_score": "Work mode fit",
+    "role_interest_score": "Role/interest fit",
+    "skill_match_score": "Skill fit",
+    "verification_score": "Source confidence",
+    "interview_score": "Interview fit",
+}
+
+
+def _format_score_breakdown(breakdown: dict[str, Any] | None) -> str:
+    if not breakdown:
+        return ""
+    parts: list[str] = []
+    for key, label in _SCORE_BREAKDOWN_LABELS.items():
+        raw = breakdown.get(key)
+        if raw is None:
+            continue
+        try:
+            pct = int(round(float(raw) * 100))
+        except (TypeError, ValueError):
+            continue
+        parts.append(f"{label} {pct}%")
+    return " | ".join(parts)
+
+
 def print_recommendation_details(rec: dict[str, Any]) -> None:
     rank = rec.get("rank", "?")
     _safe_print(f"\n{_section_header(f'Details #{rank}')}")
@@ -925,6 +916,9 @@ def print_recommendation_details(rec: dict[str, Any]) -> None:
     _safe_print(f"  Title:             {rec.get('title', '?')}")
     _safe_print(f"  Match score:       {rec.get('match_score', 0)}%")
     _safe_print(f"  Score source:      {rec.get('score_source', 'rubric')}")
+    breakdown_line = _format_score_breakdown(rec.get("score_breakdown"))
+    if breakdown_line:
+        _safe_print(f"  Score breakdown:   {breakdown_line}")
     ml_score = rec.get("ml_score")
     ml_source = rec.get("ml_score_source") or ""
     if ml_score is not None:
@@ -1055,7 +1049,8 @@ def print_turn_result(
     _safe_print()
     _safe_print(format_profile_block(profile, compact=True))
     _safe_print(_section_header("Assistant"))
-    _safe_print(f"  {reply}")
+    for reply_line in reply.split("\n"):
+        _safe_print(f"  {reply_line}")
     _safe_print()
     _safe_print(f"Scanned {total} opportunities.")
 
@@ -1151,7 +1146,7 @@ def _send_and_render(
     new_profile: dict[str, Any] = response.get("profile") or {}
     new_recommendations: list[dict[str, Any]] = response.get("recommendations") or []
     total = response.get("total_candidates", 0)
-    reply = build_assistant_reply(new_profile, new_recommendations)
+    reply = format_assistant_block(new_profile, new_recommendations)
 
     new_top_score: int | None = (
         int(new_recommendations[0].get("match_score", 0))

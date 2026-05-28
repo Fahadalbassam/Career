@@ -113,6 +113,16 @@ export function ParsedProfileCard({
               ))}
             </div>
           </ProfileRow>
+          {profile.preferredRoles && profile.preferredRoles.length > 0 ? (
+            <ProfileRow label="Roles" compact={compact}>
+              {profile.preferredRoles.join(", ")}
+            </ProfileRow>
+          ) : null}
+          {profile.interviewPreference?.trim() ? (
+            <ProfileRow label="Interview" compact={compact}>
+              {profile.interviewPreference}
+            </ProfileRow>
+          ) : null}
         </div>
       </CardContent>
     </Card>

@@ -1334,3 +1334,62 @@ def test_ml6_opportunity_schema_has_new_fields():
     assert opp.score_source == "rubric"
     assert opp.ml_score is None
     assert opp.ml_score_source is None
+
+
+# ---------------------------------------------------------------------------
+# SCORE-AUDIT-1: complete cybersecurity profile audit
+# ---------------------------------------------------------------------------
+
+SCORE_AUDIT_CYBER_MESSAGE = (
+    "I am a CS student in Khobar looking for cybersecurity COOP. "
+    "I know SQL, MongoDB, Linux, networking, and SIEM. "
+    "I prefer on-site and I want an interview. "
+    "I want to work in Security Operations."
+)
+
+
+def test_score_audit_cyber_profile_parses_full_skill_set():
+    from app.parser import parse_message
+
+    profile = parse_message(SCORE_AUDIT_CYBER_MESSAGE)
+    skills = {s.lower() for s in profile.skills}
+    assert skills >= {"sql", "mongodb", "linux", "networking", "siem", "cybersecurity"}
+
+
+def test_score_audit_missing_skills_no_exact_or_alias_duplicates():
+    from app.parser import parse_message
+
+    profile = parse_message(SCORE_AUDIT_CYBER_MESSAGE)
+    results = recommend(profile, top_n=5)
+    assert results
+    student = {s.lower() for s in profile.skills}
+    for opp in results:
+        missing_lower = [m.lower() for m in opp.missing_skills]
+        for low in missing_lower:
+            assert low not in student
+        assert "cybersecurity fundamentals" not in missing_lower
+        assert "security fundamentals" not in missing_lower
+        assert "siem" not in missing_lower
+        assert "linux" not in missing_lower
+        assert "networking" not in missing_lower
+        assert opp.score_source == "rubric"
+        assert 0 <= opp.match_score <= 100
+
+
+def test_score_audit_recommendations_sorted_by_match_score():
+    from app.parser import parse_message
+
+    profile = parse_message(SCORE_AUDIT_CYBER_MESSAGE)
+    results = recommend(profile, top_n=5)
+    scores = [r.match_score for r in results]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_score_audit_top_match_is_conservative_not_capped_artificially():
+    """Strong cyber profile should score well but not near-perfect on generic COOP."""
+    from app.parser import parse_message
+
+    profile = parse_message(SCORE_AUDIT_CYBER_MESSAGE)
+    top = recommend(profile, top_n=1)[0]
+    assert 75 <= top.match_score <= 92
+    assert top.score_breakdown["city_match_score"] <= 0.7

@@ -103,6 +103,10 @@ ROLE_EXACT_KEYWORDS: List[Tuple[str, List[str]]] = [
     ("AI Engineer", ["ai engineer"]),
     ("Cybersecurity Analyst", ["cybersecurity analyst", "cyber security analyst"]),
     ("SOC Analyst", ["soc analyst"]),
+    ("Security Operations", ["security operations", "security operator"]),
+    ("DevSecOps", ["devsecops", "dev sec ops"]),
+    ("Security Engineering", ["security engineer"]),
+    ("Network Security", ["network security engineer", "network security"]),
     ("Network Engineer", ["network engineer"]),
     ("Cloud Engineer", ["cloud engineer"]),
     ("DevOps Engineer", ["devops engineer", "devops"]),
@@ -124,6 +128,23 @@ SCORE_BREAKDOWN_KEYS: Tuple[str, ...] = (
 INTERVIEW_REQUIRED_VALUES: Tuple[str, ...] = ("Required", "Not required", "Not stated")
 
 SKILL_NOISE_TOKENS = {"", "not stated", "nan", "n/a", "none"}
+
+# Opportunity skills a student token satisfies for *missing-skills display* only.
+# Does not change rubric weights or match_score.
+_STUDENT_SKILL_SATISFIES: dict[str, frozenset[str]] = {
+    "cybersecurity": frozenset(
+        {
+            "cybersecurity fundamentals",
+            "security fundamentals",
+            "cyber security",
+            "infosec",
+            "information security",
+        }
+    ),
+    "siem": frozenset({"siem"}),
+    "networking": frozenset({"networking", "network security", "network fundamentals"}),
+    "linux": frozenset({"linux"}),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -537,6 +558,13 @@ def compute_interview_score(
             return 0.2
         return 0.5
 
+    if preference == "Interview preferred":
+        if requirement == "Required":
+            return 1.0
+        if requirement == "Not required":
+            return 0.75
+        return 0.55
+
     if preference == "Interview okay":
         if requirement == "Required":
             return 1.0
@@ -624,6 +652,26 @@ def _student_skill_set(profile: ParsedProfile) -> set[str]:
     }
 
 
+def _student_covers_skill(student: set[str], opportunity_skill: str) -> bool:
+    """Return True when the student already has this opportunity skill.
+
+    Used for missing-skills lists only. Exact matches, taxonomy-style aliases,
+    and clear prefix overlap (e.g. ``cybersecurity`` -> ``cybersecurity fundamentals``)
+    are treated as covered. Does not alter rubric scoring.
+    """
+    norm = str(opportunity_skill).strip().lower()
+    if not norm or norm in SKILL_NOISE_TOKENS:
+        return True
+    if norm in student:
+        return True
+    for token in student:
+        if norm in _STUDENT_SKILL_SATISFIES.get(token, frozenset()):
+            return True
+        if len(token) >= 5 and token in norm:
+            return True
+    return False
+
+
 def _append_missing(
     candidates: Iterable[str],
     student: set[str],
@@ -645,7 +693,7 @@ def _append_missing(
         normalized = cleaned.lower()
         if not normalized or normalized in SKILL_NOISE_TOKENS:
             continue
-        if normalized in student or normalized in seen:
+        if normalized in seen or _student_covers_skill(student, cleaned):
             continue
         seen.add(normalized)
         out.append(cleaned)

@@ -482,3 +482,56 @@ def test_parse_ml2b_i_want_role_in_devops_maps_to_cloud_devops():
     assert profile.interest == "Cloud / DevOps"
     assert "devops" in profile.skills
     assert "Cloud / DevOps" in profile.preferred_roles
+
+
+# ---------------------------------------------------------------------------
+# FINAL-POLISH-1: MongoDB, interview preference, security roles
+# ---------------------------------------------------------------------------
+
+def test_parse_mongodb_skill_from_sql_and_mongodb():
+    profile = parse_message("I know SQL and MongoDB")
+    assert "sql" in profile.skills
+    assert "mongodb" in profile.skills
+
+
+def test_parse_interview_in_person_sets_preference_and_work_mode():
+    profile = parse_message("i want an interview, in person")
+    assert profile.interview_preference == "Interview preferred"
+    assert profile.work_mode == "On-site"
+
+
+def test_parse_no_interview_preference():
+    profile = parse_message("I prefer no interview")
+    assert profile.interview_preference == "No interview preferred"
+
+
+def test_parse_security_developer_operator_preferred_role():
+    profile = parse_message("I'd like to work as a Security Developer Operator")
+    assert any(
+        role in profile.preferred_roles
+        for role in ("Security Operations", "DevSecOps", "Security Engineering")
+    )
+
+
+def test_parse_multiturn_final_polish_conversation():
+    combined = "\n".join(
+        [
+            "IM a CS student, im in IAU university , im interested in Security infrastructure, and know a bit about SQL and Mongodb",
+            "alkhobar",
+            "COOP and general training",
+            "hybrid and onsite",
+            "i want an interview, in person",
+            "I'd like to work as a Security Developer Operator",
+        ]
+    )
+    profile = parse_message(combined)
+    assert profile.major == "CS"
+    assert profile.university == "IAU"
+    assert profile.city == "Khobar"
+    assert profile.interest == "Cybersecurity"
+    assert profile.program_type == "COOP"
+    assert profile.work_mode == "On-site"
+    assert "sql" in profile.skills
+    assert "mongodb" in profile.skills
+    assert profile.interview_preference == "Interview preferred"
+    assert "Security Operations" in profile.preferred_roles

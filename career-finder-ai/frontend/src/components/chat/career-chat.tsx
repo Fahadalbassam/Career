@@ -48,16 +48,13 @@ import {
   loadAnonymousChatSession,
   saveAnonymousChatSession,
 } from "@/lib/chat-session"
+import { buildAssistantReply } from "@/lib/assistant-reply"
 import type { CareerFitMemory, Recommendation, StudentProfile } from "@/lib/types"
 
 /** Minimum mock delay before the assistant message appears (independent of loader CSS). */
 const ASSISTANT_LOAD_MIN_MS = 4000
 
 const NS = "Not stated"
-
-function isNS(value: string | undefined | null): boolean {
-  return !value || value.trim() === "" || value === NS
-}
 
 function softSkillsOnly(userText: string, profile: StudentProfile): boolean {
   const lower = userText.toLowerCase()
@@ -68,79 +65,6 @@ function softSkillsOnly(userText: string, profile: StudentProfile): boolean {
     profile.skills.length === 0 ||
     (profile.skills.length === 1 && profile.skills[0] === NS)
   return hasSoftKeyword && noTechnical
-}
-
-function buildAssistantReply({
-  profile,
-  recommendations,
-  backendSucceeded,
-  userText,
-}: {
-  profile: StudentProfile | undefined
-  recommendations: Recommendation[]
-  backendSucceeded: boolean
-  userText: string
-}): string {
-  // 1. Backend failed
-  if (!backendSucceeded || !profile) {
-    return "I'm scanning Saudi COOP and internship options. Add your major, city, and technical skills to get a personalised ranking."
-  }
-
-  // 2. Major missing — most critical, always ask first
-  if (isNS(profile.major)) {
-    return "I still need your major to rank opportunities correctly. Are you CS, AI, CYS, CIS, DS, DE, CE, or FinTech?"
-  }
-
-  // 3. Skills missing or only soft skills — ask before praising any match
-  const hasNoTechSkills =
-    profile.skills.length === 0 ||
-    (profile.skills.length === 1 && profile.skills[0] === NS)
-
-  if (hasNoTechSkills) {
-    return "Tell me a few technical skills you have used, such as Python, SQL, Linux, networking, React, Docker, cloud, cybersecurity, or machine learning."
-  }
-
-  if (softSkillsOnly(userText, profile)) {
-    return "Leadership and organisation help, but for computing COOP ranking I also need technical skills. Do you have skills like Python, SQL, Linux, networking, React, cloud, cybersecurity, or machine learning?"
-  }
-
-  // 4. City and preferred locations both missing
-  if (
-    isNS(profile.city) &&
-    (!profile.preferredLocations || profile.preferredLocations.length === 0)
-  ) {
-    return "Which city or preferred location should I prioritise? For example Riyadh, Jeddah, Dammam, Khobar, Dhahran, remote, or multiple."
-  }
-
-  // 5. Program type missing
-  if (isNS(profile.programType)) {
-    return "Are you looking for COOP, internship, Tamheer, or general training?"
-  }
-
-  // 6. Work mode missing
-  if (isNS(profile.workMode)) {
-    return "Do you prefer remote, hybrid, or on-site opportunities?"
-  }
-
-  const topRec = recommendations[0]
-  const topScore = topRec?.scorePercent ?? 0
-
-  // 7. Strong match
-  if (recommendations.length > 0 && topScore >= 85) {
-    return `Strong match found. Your top recommendation is ${topRec!.companyName} — ${topRec!.programName} at ${topScore}% match. I've updated the shelf cards with the best options.`
-  }
-
-  // 8. Good match — suggest more detail
-  if (recommendations.length > 0 && topScore >= 70) {
-    return `I found good matches, but I can improve the ranking if you add more details like preferred role, work mode, or interview preference. Top match: ${topRec!.companyName} — ${topRec!.programName}, ${topScore}%.`
-  }
-
-  // 9. Low confidence
-  if (recommendations.length > 0) {
-    return "I found some early matches, but confidence is still low. Add your preferred role, city, work mode, or stronger technical skills to improve the score."
-  }
-
-  return "I'm scanning Saudi COOP and internship options. Share your major, city, skills, or preferred work mode to get a personalised ranking."
 }
 
 function uid() {
@@ -408,7 +332,9 @@ export function CareerChat() {
         profile: parsedProfile,
         recommendations: backendRecommendationsRef.current,
         backendSucceeded: backendRecommendOkRef.current,
-        userText,
+        softSkillsOnly: parsedProfile
+          ? softSkillsOnly(userText, parsedProfile)
+          : false,
       })
 
       setEntries((prev) => [
