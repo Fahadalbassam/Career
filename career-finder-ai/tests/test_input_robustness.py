@@ -194,13 +194,18 @@ def test_partial_cybersecurity_interest():
     [
         "I am a CS student",
         "I am in Riyadh",
-        "I know Python and SQL",
         "I want cybersecurity",
     ],
 )
 def test_partial_profiles_recommend_without_crash(message: str):
     response = _recommend_safe(message)
     _assert_rubric_contract(response)
+
+
+def test_skills_only_does_not_return_recommendations():
+    response = _recommend_safe("I know Python and SQL")
+    _assert_rubric_contract(response)
+    assert response.recommendations == []
 
 
 # ---------------------------------------------------------------------------

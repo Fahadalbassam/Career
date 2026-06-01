@@ -383,3 +383,60 @@ def test_city_match_not_stated_small_score():
     opp = make_opportunity(city="Not stated")
 
     assert city_match_score(profile, opp) == 0.3
+
+
+def test_city_match_preferred_beats_acceptable():
+    profile = make_profile(
+        city="Khobar",
+        home_city="Khobar",
+        preferred_locations=["Khobar"],
+        acceptable_locations=["Riyadh"],
+    )
+    preferred_opp = make_opportunity(city="Khobar", work_mode="On-site")
+    acceptable_opp = make_opportunity(city="Riyadh", work_mode="On-site")
+    assert city_match_score(profile, preferred_opp) > city_match_score(
+        profile, acceptable_opp
+    )
+    assert city_match_score(profile, preferred_opp) == 1.0
+    assert city_match_score(profile, acceptable_opp) == 0.85
+
+
+def test_city_match_acceptable_above_no_match():
+    profile = make_profile(
+        city="Khobar",
+        acceptable_locations=["Riyadh"],
+    )
+    acceptable_opp = make_opportunity(city="Riyadh", work_mode="On-site")
+    no_match_opp = make_opportunity(city="Abha", work_mode="On-site")
+    assert city_match_score(profile, acceptable_opp) > city_match_score(
+        profile, no_match_opp
+    )
+    assert city_match_score(profile, no_match_opp) == 0.0
+
+
+def test_city_match_eastern_cluster_partial():
+    profile = make_profile(city="Dammam", home_city="Dammam")
+    opp = make_opportunity(city="Dhahran", work_mode="On-site")
+    assert city_match_score(profile, opp) == 0.7
+
+
+def test_recommendations_sorted_by_match_score_rubric():
+    from app.recommender import recommend
+
+    profile = ParsedProfile(
+        major="CS",
+        city="Khobar",
+        home_city="Khobar",
+        preferred_locations=["Khobar"],
+        acceptable_locations=["Riyadh", "Jeddah"],
+        location_flexibility="flexible",
+        interest="Software Development",
+        program_type="COOP",
+    )
+    results = recommend(profile, top_n=5)
+    assert len(results) > 0
+    scores = [r.match_score for r in results]
+    assert scores == sorted(scores, reverse=True)
+    for opp in results:
+        assert 0 <= opp.match_score <= 100
+        assert opp.score_source == "rubric"

@@ -138,7 +138,10 @@ def test_parse_empty_fields_when_unknown():
     assert profile.major is None
     assert profile.university is None
     assert profile.city is None
+    assert profile.home_city is None
     assert profile.preferred_locations == []
+    assert profile.acceptable_locations == []
+    assert profile.location_flexibility is None
     assert profile.work_mode is None
     assert profile.program_type is None
     assert profile.skills == []
@@ -494,10 +497,10 @@ def test_parse_mongodb_skill_from_sql_and_mongodb():
     assert "mongodb" in profile.skills
 
 
-def test_parse_interview_in_person_sets_preference_and_work_mode():
+def test_parse_interview_in_person_sets_preference_not_work_mode():
     profile = parse_message("i want an interview, in person")
-    assert profile.interview_preference == "Interview preferred"
-    assert profile.work_mode == "On-site"
+    assert profile.interview_preference == "Interview preferred: In person"
+    assert profile.work_mode is None
 
 
 def test_parse_no_interview_preference():
@@ -511,6 +514,49 @@ def test_parse_security_developer_operator_preferred_role():
         role in profile.preferred_roles
         for role in ("Security Operations", "DevSecOps", "Security Engineering")
     )
+
+
+# ---------------------------------------------------------------------------
+# SPRINT-1: location flexibility parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_khobar_flexible_riyadh_jeddah():
+    profile = parse_message(
+        "I'm in Khobar but I don't mind going to Riyadh or Jeddah for COOP"
+    )
+    assert profile.city == "Khobar"
+    assert profile.home_city == "Khobar"
+    assert profile.location_flexibility == "flexible"
+    assert "Khobar" in profile.preferred_locations
+    assert "Riyadh" in profile.acceptable_locations
+    assert "Jeddah" in profile.acceptable_locations
+
+
+def test_parse_looking_for_coops_in_riyadh():
+    profile = parse_message("I'm looking for COOPs in Riyadh")
+    assert profile.city == "Riyadh"
+    assert profile.preferred_locations == [] or "Riyadh" in profile.preferred_locations
+
+
+def test_parse_dammam_riyadh_is_fine():
+    profile = parse_message("I live in Dammam but Riyadh is fine")
+    assert profile.home_city == "Dammam"
+    assert profile.city == "Dammam"
+    assert profile.location_flexibility in ("flexible", "moderate")
+    assert "Riyadh" in profile.acceptable_locations
+
+
+def test_parse_eastern_province_travel_jeddah():
+    profile = parse_message("I prefer Eastern Province but I can travel to Jeddah")
+    assert profile.location_flexibility == "flexible"
+    for city in ("Dammam", "Khobar", "Dhahran"):
+        assert city in profile.preferred_locations
+    assert "Jeddah" in profile.acceptable_locations
+
+
+def test_parse_alkhobar_normalises_to_khobar_sprint():
+    profile = parse_message("Alkhobar")
+    assert profile.city == "Khobar"
 
 
 def test_parse_multiturn_final_polish_conversation():
@@ -533,5 +579,70 @@ def test_parse_multiturn_final_polish_conversation():
     assert profile.work_mode == "On-site"
     assert "sql" in profile.skills
     assert "mongodb" in profile.skills
-    assert profile.interview_preference == "Interview preferred"
+    assert profile.interview_preference == "Interview preferred: In person"
     assert "Security Operations" in profile.preferred_roles
+
+
+# ---------------------------------------------------------------------------
+# HOTFIX-4.2: interview preference + API skill aliases
+# ---------------------------------------------------------------------------
+
+def test_hotfix_interview_preference_followup_in_person():
+    profile = parse_message("interview preference would be in person")
+    assert profile.interview_preference == "Interview preferred: In person"
+
+
+def test_hotfix_interview_would_like_in_person():
+    profile = parse_message("I would like my interview to be in person")
+    assert profile.interview_preference == "Interview preferred: In person"
+
+
+def test_hotfix_online_interview_remote():
+    profile = parse_message("online interview")
+    assert profile.interview_preference == "Interview preferred: Remote"
+
+
+def test_hotfix_prefer_no_interview():
+    profile = parse_message("I prefer no interview")
+    assert profile.interview_preference == "No interview preferred"
+
+
+def test_hotfix_coop_onsite_hybrid_not_interview_preference():
+    profile = parse_message("I want my COOP to be onsite or hybrid")
+    assert profile.interview_preference is None
+    assert profile.work_mode == "On-site"
+
+
+def test_hotfix_i_know_api_normalises_to_apis():
+    profile = parse_message("i know API")
+    assert "apis" in profile.skills
+
+
+def test_hotfix_i_know_rest_apis_normalises_to_apis():
+    profile = parse_message("I know REST APIs")
+    assert "apis" in profile.skills
+
+
+def test_hotfix_multiturn_interview_followup_merges_with_profile():
+    turn1 = (
+        "im a cs student at imam abdulrahman bin faisal university, currently living in khobar, "
+        "im looking for coop opportunities in riyadh, im interested in security and devops, "
+        "i have a background in prompt engineering and web development, "
+        "I want my COop to be onsite or hybrid."
+    )
+    combined = turn1 + "\ninterview preference would be in person"
+    profile = parse_message(combined)
+    assert profile.major == "CS"
+    assert profile.city == "Khobar"
+    assert "devops" in profile.skills
+    assert profile.interview_preference == "Interview preferred: In person"
+
+
+def test_hotfix_multiturn_api_skill_merges_with_profile():
+    turn1 = (
+        "CS student in Khobar with python, linux, devops, cybersecurity, prompt engineering"
+    )
+    combined = turn1 + "\ni know API"
+    profile = parse_message(combined)
+    assert "python" in profile.skills
+    assert "apis" in profile.skills

@@ -11,6 +11,8 @@ from typing import List, Optional, Tuple
 
 from app.schemas import ParsedProfile
 from app.taxonomy import (
+    EASTERN_PROVINCE_CITIES,
+    EASTERN_PROVINCE_PHRASES,
     INTEREST_ALIASES,
     SKILL_ALIASES,
     find_city_in_text,
@@ -124,6 +126,12 @@ SKILL_KEYWORDS: List[str] = [
     "incident response",
     "vulnerability assessment",
     "cicd",
+    "unity",
+    "unreal",
+    "airflow",
+    "terraform",
+    "redis",
+    "apis",
 ]
 
 # (canonical label, keyword phrases) — longer phrases should be listed first per role
@@ -205,8 +213,37 @@ NO_INTERVIEW_PHRASES: List[str] = [
     "prefer no interview",
     "do not want an interview",
     "don't want an interview",
+    "don't want interview",
+    "do not want interview",
+    "i don't want interview",
+    "i do not want interview",
     "accepts right away",
     "direct acceptance",
+]
+
+INTERVIEW_IN_PERSON_PHRASES: List[str] = [
+    "interview preference would be in person",
+    "interview preference is in person",
+    "interview preference in person",
+    "my interview to be in person",
+    "interview to be in person",
+    "would like my interview to be in person",
+    "want my interview to be in person",
+    "want an interview, in person",
+    "want an interview in person",
+    "prefer in-person interview",
+    "prefer in person interview",
+    "in-person interview",
+    "in person interview",
+    "face to face interview",
+    "face-to-face interview",
+]
+
+INTERVIEW_REMOTE_PHRASES: List[str] = [
+    "online interview",
+    "remote interview",
+    "virtual interview",
+    "video interview",
 ]
 
 INTERVIEW_PREFERRED_PHRASES: List[str] = [
@@ -214,8 +251,6 @@ INTERVIEW_PREFERRED_PHRASES: List[str] = [
     "want an interview",
     "with interview",
     "interview preferred",
-    "on-site interview",
-    "in person interview",
 ]
 
 INTERVIEW_OKAY_PHRASES: List[str] = [
@@ -240,7 +275,7 @@ QUALIFICATION_SKILL_OVERLAP: dict[str, str] = {
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _normalize_text(message: str) -> str:
+def _normalize_text(message: str, *, preserve_in_person: bool = False) -> str:
     """
     Normalize raw student text before extracting profile fields.
 
@@ -249,6 +284,9 @@ def _normalize_text(message: str) -> str:
         "Cyber Security CO-OP in Riyadh!!!"
         becomes
         "cybersecurity coop in riyadh"
+
+    When ``preserve_in_person`` is True, ``in person`` is not rewritten to
+    ``on-site`` so interview-mode phrases stay distinct from work-mode parsing.
     """
     text = message.lower().strip()
 
@@ -264,7 +302,8 @@ def _normalize_text(message: str) -> str:
     # Normalize work mode phrases
     text = re.sub(r"\bon\s*-\s*site\b", "on-site", text)
     text = re.sub(r"\bon\s+site\b", "on-site", text)
-    text = re.sub(r"\bin\s+person\b", "on-site", text)
+    if not preserve_in_person:
+        text = re.sub(r"\bin\s+person\b", "on-site", text)
     text = re.sub(r"\bwork\s+from\s+home\b", "remote", text)
 
     # Normalize common skill names
@@ -329,37 +368,264 @@ def _find_cities_in_order(text: str) -> List[str]:
     return cities
 
 
-def _resolve_city_and_preferred_locations(
+def _mentions_eastern_province(text: str) -> bool:
+    return any(phrase in text for phrase in EASTERN_PROVINCE_PHRASES)
+
+
+def _ordered_unique_cities(cities: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for city in cities:
+        if city not in seen:
+            seen.add(city)
+            out.append(city)
+    return out
+
+
+def _city_in_span(text: str, start: int, end: int) -> Optional[str]:
+    """Return the first canonical city mentioned in ``text[start:end]``."""
+    window = text[start:end]
+    primary, _ = find_city_in_text(window, include_extended=False)
+    return primary
+
+
+def _detect_home_city(text: str) -> Optional[str]:
+    """Infer home/base city from common phrasing."""
+    home_patterns = (
+        r"\bi\s*m\s+in\s+",
+        r"\bi\s+live\s+in\s+",
+        r"\bbased\s+in\s+",
+        r"\bfrom\s+",
+    )
+    for pattern in home_patterns:
+        for match in re.finditer(pattern, text):
+            city = _city_in_span(text, match.end(), min(len(text), match.end() + 60))
+            if city:
+                return city
+    return None
+
+
+def _detect_location_flexibility(text: str) -> Optional[str]:
+    # "open to internships/coops in …" is a preferred-location phrase, not flexibility.
+    if "open to internships" in text or "open to internship" in text:
+        open_to_flexible = False
+    elif "open to coop" in text or "open to coops" in text:
+        open_to_flexible = False
+    else:
+        open_to_flexible = "open to" in text
+
+    flexible_markers = (
+        "don't mind",
+        "dont mind",
+        "don t mind",
+        "do not mind",
+        "idm",
+        "i can go to",
+        "can go to",
+        "i can travel to",
+        "can travel to",
+        "willing to travel",
+        "willing to go",
+        "no problem going",
+        "no problem with",
+    )
+    moderate_markers = (
+        "is fine",
+        "are fine",
+        "fine with",
+        "okay with",
+        "ok with",
+        "would consider",
+        "can consider",
+    )
+    strict_markers = (
+        "only in",
+        "only at",
+        "must be in",
+        "strictly in",
+    )
+
+    if any(marker in text for marker in strict_markers):
+        return "strict"
+    if open_to_flexible or any(marker in text for marker in flexible_markers):
+        return "flexible"
+    if any(marker in text for marker in moderate_markers):
+        return "moderate"
+    return None
+
+
+def _cities_after_phrases(text: str, phrases: Tuple[str, ...]) -> List[str]:
+    found: List[str] = []
+    for phrase in sorted(phrases, key=len, reverse=True):
+        pattern = r"\b" + re.escape(phrase) + r"\b"
+        for match in re.finditer(pattern, text):
+            city = _city_in_span(
+                text,
+                match.end(),
+                min(len(text), match.end() + 80),
+            )
+            if city and city not in found:
+                found.append(city)
+    return found
+
+
+def _resolve_location_fields(
     text: str,
-) -> Tuple[Optional[str], List[str]]:
+) -> Tuple[
+    Optional[str],
+    Optional[str],
+    List[str],
+    List[str],
+    Optional[str],
+]:
     """
-  Resolve primary city and preferred locations.
+    Resolve city, home city, preferred/acceptable locations, and flexibility.
 
-  - One city: ``city`` is set, ``preferred_locations`` is empty (backward compatible).
-  - Multiple cities: ``city`` is the first mentioned; ``preferred_locations`` lists all.
-
-  Saudi-city aliases (``alkhobar``, ``al khobar``, ``al-khobar`` -> ``Khobar``,
-  ``ad dammam`` -> ``Dammam``, ``jedda`` -> ``Jeddah``, ...) are normalised via
-  :mod:`app.taxonomy`. Broader location tokens like ``Remote`` / ``Saudi Arabia``
-  are intentionally left out of this primary detection so they do not stomp on
-  work-mode parsing for messages such as ``"looking for a remote COOP"``.
+    Backward compatibility:
+      - Single city with no flexibility cues -> ``city`` set, lists empty.
+      - Multiple cities without flexibility cues -> first city + full list in
+        ``preferred_locations`` (legacy behaviour).
     """
-    cities = _find_cities_in_order(text)
+    cities = _ordered_unique_cities(_find_cities_in_order(text))
+    home_city = _detect_home_city(text)
+    flexibility = _detect_location_flexibility(text)
 
-    if not cities:
-        return None, []
+    preferred_phrases = (
+        "open to internships in",
+        "open to internship in",
+        "open to coops in",
+        "open to coop in",
+        "looking for coops in",
+        "looking for coop in",
+        "looking for internships in",
+        "looking for internship in",
+        "looking for an internship in",
+        "looking for a coop in",
+    )
+    travel_phrases = (
+        "can travel to",
+        "can go to",
+        "i can travel to",
+        "i can go to",
+        "travel to",
+    )
 
-    if len(cities) == 1:
-        return cities[0], []
+    phrase_preferred = _cities_after_phrases(text, preferred_phrases)
+    for match in re.finditer(r"\bprefer(?:red)?\b", text):
+        end = match.end()
+        but_idx = text.find(" but ", end)
+        window_end = but_idx if but_idx != -1 else min(len(text), end + 45)
+        city = _city_in_span(text, end, window_end)
+        if city and city not in phrase_preferred:
+            phrase_preferred.append(city)
+    travel_cities = _cities_after_phrases(text, travel_phrases)
 
-    return cities[0], cities
+    eastern_preferred: List[str] = []
+    if _mentions_eastern_province(text) and any(
+        token in text for token in ("prefer", "preferred", "eastern")
+    ):
+        eastern_preferred = list(EASTERN_PROVINCE_CITIES)
+
+    if not cities and not eastern_preferred and not phrase_preferred:
+        return None, home_city, [], [], flexibility
+
+    preferred: List[str] = list(eastern_preferred)
+    for city in phrase_preferred:
+        if city not in preferred:
+            preferred.append(city)
+
+    acceptable: List[str] = []
+    for city in travel_cities:
+        if city not in preferred and city not in acceptable:
+            acceptable.append(city)
+
+    if flexibility:
+        if eastern_preferred and not home_city:
+            anchor = eastern_preferred[0]
+        else:
+            anchor = home_city or (cities[0] if cities else None)
+        if anchor is None and preferred:
+            anchor = preferred[0]
+        if anchor and anchor not in preferred and not eastern_preferred:
+            preferred.insert(0, anchor)
+        elif anchor and home_city and anchor not in preferred:
+            preferred.insert(0, anchor)
+        if anchor and not eastern_preferred:
+            for city in cities:
+                if city == anchor:
+                    continue
+                if city not in preferred and city not in acceptable:
+                    acceptable.append(city)
+        for city in travel_cities:
+            if city not in preferred and city not in acceptable:
+                acceptable.append(city)
+        if eastern_preferred:
+            primary = eastern_preferred[0]
+        else:
+            primary = anchor or (preferred[0] if preferred else None)
+    elif len(cities) > 1:
+        primary = cities[0]
+        preferred = list(cities)
+        acceptable = []
+    elif len(cities) == 1:
+        primary = cities[0]
+        if phrase_preferred:
+            primary = phrase_preferred[0]
+            preferred = list(phrase_preferred)
+        else:
+            preferred = []
+        acceptable = []
+    else:
+        primary = preferred[0] if preferred else None
+        acceptable = list(acceptable)
+
+    if home_city:
+        primary = home_city
+
+    if (
+        preferred
+        and primary
+        and len(preferred) == 1
+        and preferred[0] == primary
+        and not acceptable
+        and not flexibility
+    ):
+        preferred = []
+
+    preferred = _ordered_unique_cities(preferred)
+    acceptable = _ordered_unique_cities(
+        [c for c in acceptable if c not in preferred]
+    )
+
+    return primary, home_city, preferred, acceptable, flexibility
+
+
+def _scrub_interview_scoped_work_mode_tokens(text: str) -> str:
+    """Remove on-site/remote tokens that refer to interviews, not COOP work mode."""
+    scrubbed = re.sub(
+        r"\b(?:interview\w*|interviews)\b.{0,18}\bon-site\b",
+        " ",
+        text,
+    )
+    scrubbed = re.sub(
+        r"\bon-site\b.{0,12}\b(?:interview\w*|interviews)\b",
+        " ",
+        scrubbed,
+    )
+    scrubbed = re.sub(
+        r"\b(?:interview\w*|interviews)\b.{0,18}\bremote\b",
+        " ",
+        scrubbed,
+    )
+    return scrubbed
 
 
 def _find_work_mode(text: str) -> Optional[str]:
     """Return the first matching work mode from the text."""
+    scrubbed = _scrub_interview_scoped_work_mode_tokens(text)
     for mode, keywords in WORK_MODE_KEYWORDS.items():
         for kw in keywords:
-            if kw in text:
+            if kw in scrubbed:
                 return mode
     return None
 
@@ -380,6 +646,11 @@ def _find_skills(text: str) -> List[str]:
         pattern = r"\b" + re.escape(skill) + r"\b"
         if re.search(pattern, text):
             found.append(skill)
+    if "apis" not in found and re.search(
+        r"\b(?:rest(?:ful)?\s+)?apis?\b|\bapi\s+development\b|\b(?:backend|web)\s+api\b",
+        text,
+    ):
+        found.append("apis")
     return found
 
 
@@ -438,19 +709,38 @@ def _find_interest_from_text(text: str) -> Optional[str]:
     return find_interest_in_text(text)
 
 
+def _mentions_interview_context(text: str) -> bool:
+    return "interview" in text
+
+
 def _find_interview_preference(text: str) -> Optional[str]:
-    """Return interview stance when explicitly mentioned."""
+    """Return interview stance when explicitly mentioned (interview context only)."""
+    for phrase in ("direct acceptance", "accepts right away"):
+        if phrase in text:
+            return "No interview preferred"
+
+    if not _mentions_interview_context(text):
+        return None
+
     for phrase in NO_INTERVIEW_PHRASES:
         if phrase in text:
             return "No interview preferred"
 
-    for phrase in INTERVIEW_PREFERRED_PHRASES:
-        if phrase in text:
-            return "Interview preferred"
-
     for phrase in INTERVIEW_OKAY_PHRASES:
         if phrase in text:
             return "Interview okay"
+
+    for phrase in INTERVIEW_IN_PERSON_PHRASES:
+        if phrase in text:
+            return "Interview preferred: In person"
+
+    for phrase in INTERVIEW_REMOTE_PHRASES:
+        if phrase in text:
+            return "Interview preferred: Remote"
+
+    for phrase in INTERVIEW_PREFERRED_PHRASES:
+        if phrase in text:
+            return "Interview preferred"
 
     return None
 
@@ -488,11 +778,18 @@ def parse_message(message: str) -> ParsedProfile:
     Returns:
         A :class:`ParsedProfile` with detected fields (``None`` when not found).
     """
+    normalised_interview = _normalize_text(message, preserve_in_person=True)
     normalised = _normalize_text(message)
 
     major = _find_major(normalised)
     university = _find_university(normalised)
-    city, preferred_locations = _resolve_city_and_preferred_locations(normalised)
+    (
+        city,
+        home_city,
+        preferred_locations,
+        acceptable_locations,
+        location_flexibility,
+    ) = _resolve_location_fields(normalised)
     work_mode = _find_work_mode(normalised)
     program_type = _find_program_type(normalised)
     qualifications = _find_qualifications(normalised)
@@ -501,7 +798,7 @@ def parse_message(message: str) -> ParsedProfile:
         qualifications,
     )
     preferred_roles = _find_preferred_roles(normalised)
-    interview_preference = _find_interview_preference(normalised)
+    interview_preference = _find_interview_preference(normalised_interview)
 
     interest_map = {
         "CS": "Software Development",
@@ -532,7 +829,10 @@ def parse_message(message: str) -> ParsedProfile:
         major=major,
         university=university,
         city=city,
+        home_city=home_city,
         preferred_locations=preferred_locations,
+        acceptable_locations=acceptable_locations,
+        location_flexibility=location_flexibility,
         skills=skills,
         qualifications=qualifications,
         interest=interest,

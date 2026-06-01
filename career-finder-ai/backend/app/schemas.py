@@ -59,9 +59,24 @@ class StudentProfile(BaseModel):
         description="Primary city, e.g. Riyadh, Jeddah, Dammam, Khobar, Dhahran.",
     )
 
+    home_city: Optional[str] = Field(
+        default=None,
+        description="City where the student lives or is based, when stated separately from search preference.",
+    )
+
     preferred_locations: List[str] = Field(
         default_factory=list,
-        description="Acceptable cities when multiple locations are mentioned.",
+        description="Cities the student prefers for opportunities (strong location signal).",
+    )
+
+    acceptable_locations: List[str] = Field(
+        default_factory=list,
+        description="Additional cities the student will consider when flexible about location.",
+    )
+
+    location_flexibility: Optional[str] = Field(
+        default=None,
+        description='Location stance when stated, e.g. "flexible", "moderate", or "strict".',
     )
 
     skills: List[str] = Field(

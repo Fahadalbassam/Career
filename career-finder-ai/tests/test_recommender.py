@@ -286,7 +286,7 @@ def test_recommendations_explain_skill_matches(monkeypatch):
     for opp in results:
         all_reasons.extend(opp.why_recommended)
 
-    assert any("Matches your skills" in reason for reason in all_reasons)
+    assert any("Skill overlap" in reason for reason in all_reasons)
 
 def test_load_opportunities_from_xlsx(tmp_path):
     xlsx_file = tmp_path / "opportunities_clean.xlsx"

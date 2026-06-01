@@ -172,6 +172,25 @@ Then open: **http://127.0.0.1:8000/docs**
 
 The interactive Swagger UI lets you test all endpoints directly in the browser.
 
+### Final demo stack (SPRINT-4 — from `career-finder-ai/`)
+
+```bash
+# Backend
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir backend
+
+# Terminal CLI (second terminal)
+python scripts/careerfinder_cli.py
+
+# Frontend (optional)
+cd frontend
+npm install
+npm run dev
+```
+
+Use a **full** `npm install` (not `--omit=dev`) because Playwright is a devDependency required for `npm run build`. On PowerShell, use `npm.cmd` if `npm` scripts are blocked.
+
+Automated lock checks: `python scripts/final_demo_smoke.py`. Walkthrough: `career-finder-ai/docs/reports/final_demo_script.md`.
+
 ---
 
 ## Running Tests

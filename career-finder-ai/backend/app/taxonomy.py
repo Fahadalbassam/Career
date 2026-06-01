@@ -142,6 +142,17 @@ INTEREST_ALIASES: Dict[str, List[str]] = {
         "qa",
         "testing",
     ],
+    "Game Development": [
+        "game development",
+        "game developer",
+        "game design",
+        "game engine",
+        "gameplay",
+        "unity",
+        "unreal engine",
+        "game programming",
+        "game",
+    ],
     "FinTech": [
         "fintech",
         "financial technology",
@@ -188,6 +199,11 @@ INTEREST_TO_ROLE_CLUSTERS: Dict[str, List[str]] = {
     "FinTech": [
         "FinTech",
         "Financial Technology",
+    ],
+    "Game Development": [
+        "Game Development",
+        "Game Developer",
+        "Unity Developer",
     ],
 }
 
@@ -273,6 +289,16 @@ INTEREST_OPPORTUNITY_KEYWORDS: Dict[str, List[str]] = {
         "financial technology",
         "banking",
     ],
+    "Game Development": [
+        "game development",
+        "game developer",
+        "game design",
+        "unity",
+        "unreal",
+        "gameplay",
+        "game programming",
+        "game engine",
+    ],
 }
 
 # Legacy interest labels that the major-derived defaults still emit
@@ -350,6 +376,16 @@ EXTENDED_LOCATION_ALIASES: Dict[str, str] = {
     "saudi arabia": "Saudi Arabia",
 }
 
+# Canonical Eastern Province cities (used when the student names the region).
+EASTERN_PROVINCE_CITIES: Tuple[str, ...] = ("Dammam", "Khobar", "Dhahran")
+
+EASTERN_PROVINCE_PHRASES: Tuple[str, ...] = (
+    "eastern province",
+    "eastern region",
+    "eastern saudi",
+    "eastern saudi arabia",
+)
+
 
 # ---------------------------------------------------------------------------
 # Skill aliases
@@ -359,6 +395,14 @@ EXTENDED_LOCATION_ALIASES: Dict[str, str] = {
 # lower case so they align with the existing ``SKILL_KEYWORDS`` list in
 # ``app.parser``.
 SKILL_ALIASES: Dict[str, str] = {
+    "rest apis": "apis",
+    "rest api": "apis",
+    "restful api": "apis",
+    "restful apis": "apis",
+    "api development": "apis",
+    "backend api": "apis",
+    "web api": "apis",
+    "api": "apis",
     "dev ops": "devops",
     "k8s": "kubernetes",
     "pen testing": "penetration testing",

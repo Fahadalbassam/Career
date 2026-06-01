@@ -13,7 +13,9 @@ from typing import List
 import pandas as pd
 
 import app.ml_scoring as _ml_scoring
+from app.input_intent import should_recommend
 from app.parser import parse_message
+from app.role_inference import infer_role_families
 from app.rubric import (
     SCORE_BREAKDOWN_KEYS,
     compute_missing_preferred_skills,
@@ -21,6 +23,7 @@ from app.rubric import (
     compute_missing_skills,
     infer_interview_required,
     infer_role_cluster,
+    normalize_text as rubric_normalize_text,
     score_profile_opportunity_pair,
 )
 from app.schemas import Opportunity, ParsedProfile, RecommendResponse
@@ -330,6 +333,42 @@ def filter_candidates(
 
     return filtered
 
+def _role_family_reason(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+) -> str:
+    """Return a transparent role-family evidence string (empty when no match).
+
+    Sprint-2 Part E: adds role-family evidence to explanation reasons without
+    modifying match_score or TARGET_WEIGHTS.  Only surfaces a reason when there
+    is at least one role family with confidence >= 0.30 and the opportunity's
+    role_cluster / title overlaps that family's keywords.
+    """
+    try:
+        result = infer_role_families(profile)
+        if not result.matches:
+            return ""
+        top_match = result.matches[0]
+        if top_match.confidence < 0.30:
+            return ""
+        from app.role_families import ROLE_FAMILIES  # local import avoids cycles
+        family_def = ROLE_FAMILIES.get(top_match.role_family)
+        if not family_def:
+            return ""
+        opp_text = rubric_normalize_text(
+            " ".join([opportunity.title, opportunity.role_cluster])
+        )
+        for kw in family_def.keywords:
+            if kw.lower() in opp_text:
+                return (
+                    f"Role-family match: {top_match.role_family} "
+                    f"({int(top_match.confidence * 100)}% confidence)"
+                )
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def build_recommendation_reasons(
     profile: ParsedProfile,
     opportunity: Opportunity,
@@ -350,27 +389,46 @@ def build_recommendation_reasons(
 
     # 1. Major match
     if profile.major and profile.major in opportunity.major_fit:
-        reasons.append(f"Matches your major: {profile.major}")
+        reasons.append(f"This appears to fit your major: {profile.major}")
 
     # 2. City match
     if profile.city and profile.city.lower() == opportunity.city.lower():
-        reasons.append(f"Matches your preferred city: {profile.city}")
+        reasons.append(f"Location appears to match your city: {profile.city}")
+    elif profile.city and opportunity.city:
+        opp_city = opportunity.city.lower().strip()
+        student_city = profile.city.lower().strip()
+        if opp_city in {"saudi arabia", "multiple", "remote"} or opp_city != student_city:
+            from app.rubric import compute_city_match_score
+
+            city_score = compute_city_match_score(profile, opportunity)
+            if 0.65 <= city_score < 0.95:
+                reasons.append(
+                    f"Regional location match ({opportunity.city}) — not an exact city match"
+                )
+            elif 0.45 <= city_score < 0.65:
+                reasons.append(
+                    f"Broad location match ({opportunity.city}), not an exact city match"
+                )
 
     # 3. Work mode match
     if profile.work_mode and profile.work_mode.lower() == opportunity.work_mode.lower():
-        reasons.append(f"Matches your preferred work mode: {profile.work_mode}")
+        reasons.append(f"Work mode appears to match: {profile.work_mode}")
+    elif profile.work_mode and (
+        not opportunity.work_mode or opportunity.work_mode.lower() == "not stated"
+    ):
+        reasons.append("Work mode is not stated on the source")
 
     # 4. Program type match
     if profile.program_type and profile.program_type.lower() == opportunity.program_type.lower():
-        reasons.append(f"Matches your preferred program type: {profile.program_type}")
+        reasons.append(f"Program type appears to match: {profile.program_type}")
 
     # 5. Interest match
     if profile.interest and profile.interest.lower() in opportunity.title.lower():
-        reasons.append(f"Matches your interest in {profile.interest}")
+        reasons.append(f"The opportunity partially matches your interest in {profile.interest}")
 
     # 6. Source URL / verification
     if opportunity.source_url:
-        reasons.append("Has a verified source URL")
+        reasons.append("Has a source link for verification")
 
     # 7. Skill matches
     searchable_text = " ".join(
@@ -388,8 +446,13 @@ def build_recommendation_reasons(
 
     if skills_matched:
         reasons.append(
-            "Matches your skills: " + ", ".join(skills_matched)
+            "Skill overlap: " + ", ".join(skills_matched)
         )
+
+    # 8. Sprint-2 — transparent role-family evidence (does not affect score)
+    rf_reason = _role_family_reason(profile, opportunity)
+    if rf_reason:
+        reasons.append(rf_reason)
 
     # Fallback reason if no specific reason was found
     if not reasons:
@@ -505,8 +568,16 @@ def recommend_from_message(message: str, top_n: int = 5) -> RecommendResponse:
         :class:`RecommendResponse` with profile and ranked opportunities.
     """
     profile = parse_message(message)
-    recommendations = recommend(profile, top_n=top_n)
     total_candidates = len(get_candidates())
+
+    if not should_recommend(message, profile):
+        return RecommendResponse(
+            profile=profile,
+            recommendations=[],
+            total_candidates=total_candidates,
+        )
+
+    recommendations = recommend(profile, top_n=top_n)
 
     return RecommendResponse(
         profile=profile,

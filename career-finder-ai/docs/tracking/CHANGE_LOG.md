@@ -756,3 +756,117 @@ egression_split_summary.json. Prints a readable terminal summary. Verifies: rati
 **What did NOT change.** No rubric weights, ranking strategy, ML retrain, UI redesign, or new product features.
 
 **Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml) → **202/202 passed**. `npm run lint` / `npm run build` → pass.
+
+---
+
+## 2026-05-31 — SPRINT-1 terminal UX and location flexibility
+
+**Where.** `scripts/careerfinder_cli.py`, `backend/app/parser.py`, `backend/app/schemas.py`, `backend/app/taxonomy.py`, `backend/app/rubric.py`, `backend/app/scoring.py`, `tests/test_parser.py`, `tests/test_scoring.py`, `tests/test_cli_ml_commands.py`, `docs/reports/sprint_1_terminal_location_improvements.md` (new).
+
+**What changed.**
+
+- Terminal: new ASCII logo (white), brand line with green ●, `/reset`/`/home` full session reset, `/clear` screen-only, `/help` command list, profile lines for location flexibility fields.
+- Parser: `home_city`, `acceptable_locations`, `location_flexibility`; phrase-aware multi-city and Eastern Province handling.
+- Rubric location scorer: preferred 1.0, acceptable 0.85, EP cluster 0.7 (unchanged weight in composite).
+
+**What did NOT change.** No ML retrain, no `TARGET_WEIGHTS` change, no frontend redesign, no dataset file edits.
+
+**Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml, scoring) → **254 passed**. `npm run lint` → pass; `npm run build` → fails on missing `@playwright/test` types (environment/pre-existing).
+
+---
+
+## 2026-05-31 — SPRINT-1.1 frontend build / Playwright devDependency
+
+**Where.** `frontend/README.md`, `docs/tracking/TEST_LOG.md`.
+
+**What changed.**
+
+- Confirmed `@playwright/test` is already listed in `frontend/package.json` `devDependencies` (^1.51.1) with a matching `package-lock.json` entry.
+- Root cause of the Sprint 1 build failure: `node_modules` was missing dev packages (Playwright not installed). Running `npm install` in `frontend/` installs `@playwright/test` and restores a clean `npm run build`.
+- Documented that a **full** `npm install` (not `--omit=dev`) is required because Next.js type-checks `playwright.config.ts` during production build.
+
+**What did NOT change.** No UI, backend, parser, rubric, ML, or Playwright test removal. `package.json` / `package-lock.json` unchanged in this pass.
+
+**Test results.** `npm run lint` → pass; `npm run build` → pass. Backend pytest group → **254 passed**.
+
+---
+
+## 2026-05-31 — SPRINT-2 role-family intelligence and guided questioning
+
+**Where.** `backend/app/role_families.py` (new), `backend/app/role_inference.py` (new), `backend/app/assistant_reply.py`, `backend/app/recommender.py`, `backend/app/parser.py`, `backend/app/taxonomy.py`, `tests/test_role_inference.py` (new), `docs/reports/sprint_2_role_skill_guidance.md` (new).
+
+**What changed.**
+
+- **14 role families** with foundational / differentiating / signature skills, keywords, interests, and suggested questions (`role_families.py`).
+- **`infer_role_families(profile)`** returns confidence, evidence, missing signals, ambiguity, discovery mode, and skill-vs-interest transition paths (`role_inference.py`).
+- **Assistant / terminal:** at most one clarifying question; discovery choices for "idk"; role directions appended after recommendations when signal exists; conflict question when skills and interests diverge.
+- **Parser / taxonomy:** Unity, Unreal, Airflow, game-development interest aliases.
+- **Recommender:** optional transparent `Role-family match: …` in `why_recommended` when opportunity text aligns — no `match_score` change.
+
+**What did NOT change.** No ML retrain, no dataset file edits, no `TARGET_WEIGHTS` change, no frontend redesign, no auth/search/recruiter features.
+
+**Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml, scoring, role_inference) → **301 passed**. `npm run lint` / `npm run build` → pass.
+
+---
+
+## 2026-05-31 — SPRINT-3 recommendation explanation quality
+
+**Where.** `backend/app/recommendation_explanation.py` (new), `backend/app/rubric.py`, `backend/app/recommender.py`, `backend/app/assistant_reply.py`, `scripts/careerfinder_cli.py`, `tests/test_recommendation_explanation.py` (new), `tests/test_recommender.py`, `tests/test_assistant_reply.py`, `tests/test_cli_ml_commands.py`, `docs/reports/sprint_3_recommendation_explanation_quality.md` (new).
+
+**What changed.**
+
+- Structured `/details N` output: basic info, why matched, qualitative score breakdown, matched/missing skills, next best action.
+- Missing-skill alias cleanup (cybersecurity/SIEM/Power BI/Node.js/k8s etc.) for display only.
+- Honest explanation language (broad location, interview not stated, “appears to fit”).
+- Assistant next-best-action uses concrete missing skills instead of generic phrasing.
+
+**What did NOT change.** No ML retrain, no dataset edits, no `TARGET_WEIGHTS` change, no frontend redesign, no artificial score inflation. Ranking remains `match_score` / `score_source=rubric`.
+
+**Test results.** `pytest` (parser, recommender, input_robustness, assistant_reply, cli_ml, scoring, role_inference, recommendation_explanation) → **315 passed**. `npm run lint` / `npm run build` → pass. Manual CLI smoke: cyber Khobar COOP → `/details 1` OK.
+
+---
+
+## 2026-05-31 — SPRINT-4 final demo lock and QA scripts
+
+**Where.** `docs/reports/final_demo_script.md`, `docs/reports/final_qa_lock.md` (new/updated), `scripts/final_demo_smoke.py` (new), `backend/README.md`, root `README.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- **Final demo script** — five live scenarios (discovery, SQL ambiguity, location flexibility, full cyber COOP, `/details 1`, `/reset`) plus run commands, talking points, and presentation limits.
+- **`scripts/final_demo_smoke.py`** — deterministic backend checks (parser, role inference, recommender, details formatter) with PASS/FAIL summary; prints top recommendation when dataset matches canonical demo.
+- **Run docs** — repo-root uvicorn (`--app-dir backend`), CLI, frontend `npm install` / PowerShell `npm.cmd` note.
+- **QA lock report** — checklist for pytest, lint/build, smoke, manual scenarios, known limitations, safe demo input, claims to avoid.
+
+**What did NOT change.** No ML retrain, no dataset file edits, no `TARGET_WEIGHTS` change, no frontend redesign, no new product features, no artificial score inflation. Ranking remains `match_score` / `score_source=rubric`.
+
+**Test results.** `pytest` → **315 passed**; `python scripts/final_demo_smoke.py` → **PASS (4/4)** (Bank Albilad 86% #1); `npm run lint` / `npm run build` → pass.
+
+---
+
+## 2026-06-01 — HOTFIX-4.1 terminal demo safety
+
+**Where.** `backend/app/input_intent.py` (new), `backend/app/recommender.py`, `scripts/careerfinder_cli.py`, `tests/test_input_intent.py` (new), `tests/test_cli_ml_commands.py`, `tests/test_input_robustness.py`, `docs/reports/final_demo_script.md`, `docs/reports/final_qa_lock.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- **Compact terminal header** — removed wide ASCII logo; restored short `CareerFinder ● ai` banner (green dot when ANSI is available).
+- **Greeting / noise guard** — `hey`, `ehy`, `salam`, Arabic greetings, and noise like `asdf` / `ok` no longer call `/recommend` or show empty profile + weak Top 5.
+- **Recommendation gating** — `should_recommend` blocks empty profiles, discovery-only turns, and skills-only ambiguity (`I know SQL`); full demo input still ranks normally.
+- **Backend readiness** — direct `python scripts/careerfinder_cli.py` checks `GET /health` before the chat loop and prints the uvicorn start command if the API is down (`npm run run:terminal` unchanged).
+
+**What did NOT change.** No ML retrain, no dataset edits, no rubric weight changes, no taxonomy/scoring changes, no frontend redesign. Ranking remains `match_score` / `score_source=rubric`.
+
+---
+
+## 2026-06-01 — HOTFIX-4.2 interview preference + API skill aliases
+
+**Where.** `backend/app/parser.py`, `backend/app/taxonomy.py`, `backend/app/rubric.py`, `tests/test_parser.py`, `tests/test_assistant_reply.py`, `docs/reports/final_demo_script.md`, `docs/reports/final_qa_lock.md`, `docs/tracking/*`.
+
+**What changed.**
+
+- Interview preference parsing for in-person, remote/online, generic interview, and no-interview phrases; `in person` is not rewritten to `on-site` before interview detection; work-mode parsing ignores interview-scoped on-site/remote tokens.
+- Multi-turn CLI/session: newline-joined messages retain prior profile fields and apply follow-up interview preference and API skills.
+- API skill aliases (`api`, `REST API`, `API development`, …) normalize to `apis`; missing-skills cleanup treats API variants as covered when the student lists `apis`.
+- `compute_interview_score` treats `Interview preferred: In person` / `Interview preferred: Remote` like `Interview preferred` (same component weights).
+
+**What did NOT change.** No ML retrain, no dataset file edits, no `TARGET_WEIGHTS` change, no ranking strategy change, no frontend redesign. Ranking remains `score_source=rubric`.

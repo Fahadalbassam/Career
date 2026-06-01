@@ -17,6 +17,8 @@ From this directory (`career-finder-ai/frontend`):
 npm install
 ```
 
+This installs **devDependencies** as well (including `@playwright/test`). Next.js type-checks `playwright.config.ts` during `npm run build`, so a production-only install (`npm install --omit=dev`) will fail the build. Use a full install before `npm run build` or `npm run test:e2e`.
+
 ## Run the development server
 
 ```bash

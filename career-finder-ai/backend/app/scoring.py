@@ -39,38 +39,59 @@ def city_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
 
     Rules:
         No student city preference -> 0.5
-        Exact city match -> 1.0
+        Exact preferred / primary / home city match -> 1.0
+        Acceptable location match -> 0.85
         Same Eastern Province cluster -> 0.7
         Remote opportunity -> 0.5
         Saudi Arabia / Multiple / Remote city -> 0.5
         Not stated -> 0.3
         No match -> 0.0
     """
-    if not profile.city:
-        return 0.5
-
-    student_city = profile.city.lower().strip()
+    preferred = {
+        c.lower().strip()
+        for c in profile.preferred_locations
+        if c and c.strip()
+    }
+    acceptable = {
+        c.lower().strip()
+        for c in profile.acceptable_locations
+        if c and c.strip()
+    }
+    student_city = (profile.city or "").lower().strip()
+    home_city = (profile.home_city or profile.city or "").lower().strip()
     opportunity_city = opportunity.city.lower().strip()
     opportunity_work_mode = opportunity.work_mode.lower().strip()
 
     if not opportunity_city or opportunity_city == "not stated":
         return 0.3
 
-    if student_city == opportunity_city:
+    if preferred and opportunity_city in preferred:
         return 1.0
 
-    eastern_province = {"dammam", "khobar", "dhahran"}
+    if student_city and student_city == opportunity_city:
+        return 1.0
 
-    if student_city in eastern_province and opportunity_city in eastern_province:
+    if home_city and home_city == opportunity_city:
+        return 1.0
+
+    if acceptable and opportunity_city in acceptable:
+        return 0.85
+
+    eastern_province = {"dammam", "khobar", "dhahran"}
+    anchor = home_city or student_city
+
+    if anchor in eastern_province and opportunity_city in eastern_province:
         return 0.7
 
-    # If the opportunity is remote, the exact city is less important.
     if "remote" in opportunity_work_mode:
         return 0.5
 
     flexible_locations = {"saudi arabia", "multiple", "remote"}
 
     if opportunity_city in flexible_locations:
+        return 0.5
+
+    if not student_city and not home_city and not preferred and not acceptable:
         return 0.5
 
     return 0.0

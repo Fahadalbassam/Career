@@ -49,6 +49,14 @@ from app.assistant_reply import (  # noqa: E402
     build_assistant_reply_parts,
     format_assistant_reply,
 )
+from app.input_intent import (  # noqa: E402
+    build_greeting_reply,
+    build_guidance_reply,
+    is_greeting_only,
+    should_recommend,
+)
+from app.parser import parse_message  # noqa: E402
+from app.recommendation_explanation import format_details_lines  # noqa: E402
 
 API_BASE = os.environ.get("CAREERFINDER_API_BASE", "http://127.0.0.1:8000").rstrip("/")
 
@@ -68,45 +76,44 @@ ACCIDENTAL_INPUT_MSG = (
     "That looks accidental. Type a full message, /help, /details 1, or /exit."
 )
 
-ASCII_LOGO = r"""
- _____                         ______ _           _                       _ 
-/  __ \                        |  ___(_)         | |                     (_)
-| /  \/ __ _ _ __ ___  ___ _ __| |_   _ _ __   __| | ___ _ __        __ _ _ 
-| |    / _` | '__/ _ \/ _ \ '__|  _| | | '_ \ / _` |/ _ \ '__|      / _` | |
-| \__/\ (_| | | |  __/  __/ |  | |   | | | | | (_| |  __/ |     _  | (_| | |
- \____/\__,_|_|  \___|\___|_|  \_|   |_|_| |_|\__,_|\___|_|    (_)  \__,_|_|
-""".strip(
-    "\n"
-)
+ASCII_LOGO = r"""   ____                         _____ _           _                           
+  / ___|__ _ _ __ ___  ___ _ __|  ___(_)_ __   __| | ___ _ __       ___  __ _ 
+ | |   / _` | '__/ _ \/ _ \ '__| |_  | | '_ \ / _` |/ _ \ '__|     / __|/ _` |
+ | |__| (_| | | |  __/  __/ |  |  _| | | | | | (_| |  __/ |     _  \__ \ (_| |
+  \____\__,_|_|  \___|\___|_|  |_|   |_|_| |_|\__,_|\___|_|    (_) |___/\__,_|"""
 
-PLAIN_LOGO = "CareerFinder.ai"
+BACKEND_UNAVAILABLE_MSG = """Backend is not running.
+Start it in another terminal:
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir backend
+
+Then restart the CLI."""
 
 HELP_TEXT = """
 Commands:
-  /help              Show this help
-  /profile           Full parsed profile (all fields)
-  /top               Compact top 5 (default)
-  /top N             Compact top N
-  /details N         Full details for recommendation rank N
-  /open N            Open rank N source URL in your browser
-  /links             All ranked source URLs (raw)
-  /history           Show remembered user messages
-  /undo              Remove last user message and rerun (if any remain)
-  /metrics           Fair + rubric-assisted model metrics (from ML reports)
-  /model             Live ML shadow status (ranking stays rubric-based)
-  /shadow            Rubric vs ML comparison summary
-  /ml                Short combined ML status + key metrics
-  /compact           Default compact output
-  /verbose           Verbose multi-line recommendation output
-  /split             Side-by-side layout when terminal >= 120 cols
-  /clear             Clear conversation and screen
-  /login             Login placeholder (stub)
-  /guest             Continue as guest
-  /exit              Quit
+  /help     Show commands
+  /profile  Show current parsed profile
+  /details N  Show details for result N
+  /reset    Reset session and return home
+  /home     Same as reset
+  /clear    Clear screen (keeps session state)
+  /exit     Quit
+
+Also available:
+  /top [N]  Compact top N (default 5)
+  /open N   Open rank N source URL
+  /links    All ranked source URLs
+  /history  Remembered user messages
+  /undo     Remove last message and rerun
+  /metrics  Fair + rubric-assisted ML metrics
+  /model    ML shadow status (ranking stays rubric)
+  /shadow   Rubric vs ML comparison
+  /ml       Combined ML status
+  /compact  /verbose  /split  Output modes
+  /login    /guest    Auth placeholders
 
 Type a natural-language message to update your profile and get recommendations.
 Messages accumulate across turns (same as the web chat).
-Use /details N or /open N to inspect a specific match.
+/clear only clears the screen; /reset or /home clears session state too.
 """.strip()
 
 COMMANDS_TIP = (
@@ -408,6 +415,8 @@ def _ansi_supported() -> bool:
 
 _ANSI = _ansi_supported()
 _BOLD = "\033[1m" if _ANSI else ""
+_WHITE = "\033[97m" if _ANSI else ""
+_GREEN = "\033[92m" if _ANSI else ""
 _RESET = "\033[0m" if _ANSI else ""
 
 
@@ -455,12 +464,32 @@ def clear_screen() -> None:
 
 
 def print_logo() -> None:
-    try:
-        _safe_print(ASCII_LOGO)
-    except Exception:
-        _safe_print(PLAIN_LOGO)
-    _safe_print()
+    for line in ASCII_LOGO.splitlines():
+        if _ANSI:
+            _safe_print(f"{_WHITE}{line}{_RESET}")
+        else:
+            _safe_print(line)
     _safe_print("Saudi COOP & internship recommender for computing students")
+    _safe_print()
+
+
+def print_welcome_menu(api_base: str = API_BASE) -> None:
+    _safe_print("Welcome to CareerFinder.ai terminal chat.")
+    _safe_print(f"Backend: {api_base}")
+    _safe_print()
+    _safe_print("[1] Continue as guest")
+    _safe_print("[2] Login placeholder")
+    _safe_print()
+    _safe_print("Type your profile in natural language, or /help for commands.")
+    _safe_print("Default view: compact. Use /verbose for full cards.")
+    _safe_print()
+
+
+def show_home_screen() -> None:
+    """Redraw logo and welcome menu (screen cleared first)."""
+    clear_screen()
+    print_logo()
+    print_welcome_menu()
     _safe_print()
 
 
@@ -543,16 +572,20 @@ def show_loading_pattern(label: str = "Analyzing profile") -> None:
 # ---------------------------------------------------------------------------
 
 def build_assistant_reply(
-    profile: dict[str, Any], recommendations: list[dict[str, Any]]
+    profile: dict[str, Any],
+    recommendations: list[dict[str, Any]],
+    message: str = "",
 ) -> str:
-    return _build_assistant_reply(profile, recommendations)
+    return _build_assistant_reply(profile, recommendations, message=message)
 
 
 def format_assistant_block(
-    profile: dict[str, Any], recommendations: list[dict[str, Any]]
+    profile: dict[str, Any],
+    recommendations: list[dict[str, Any]],
+    message: str = "",
 ) -> str:
-    """Format assistant output with optional Top match / Next action lines."""
-    parts = build_assistant_reply_parts(profile, recommendations)
+    """Format assistant output with optional Top match / Next action / role-directions lines."""
+    parts = build_assistant_reply_parts(profile, recommendations, message=message)
     return format_assistant_reply(parts)
 
 
@@ -629,6 +662,22 @@ def build_score_change_notes(
 # Networking
 # ---------------------------------------------------------------------------
 
+def check_backend_health(timeout: float = 3.0) -> bool:
+    """Return True when GET /health succeeds."""
+    url = f"{API_BASE}/health"
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError):
+        return False
+
+
+def print_backend_unavailable() -> None:
+    _safe_print(BACKEND_UNAVAILABLE_MSG)
+    _safe_print()
+
+
 def post_recommend(message: str) -> dict[str, Any]:
     url = f"{API_BASE}/recommend"
     payload = json.dumps({"message": message}).encode("utf-8")
@@ -677,7 +726,28 @@ def _profile_field_lines(profile: dict[str, Any], compact: bool) -> list[str]:
 
     add("Major", profile.get("major"))
     add("University", profile.get("university"))
-    add("City", profile.get("city"))
+
+    home_city = profile.get("home_city")
+    city = profile.get("city")
+    preferred_locs = profile.get("preferred_locations") or []
+    acceptable_locs = profile.get("acceptable_locations") or []
+    loc_flex = profile.get("location_flexibility")
+
+    if not is_missing(home_city) or preferred_locs or acceptable_locs or loc_flex:
+        if not is_missing(home_city):
+            lines.append(f"  City/Home city: {home_city}")
+        elif not is_missing(city):
+            lines.append(f"  City/Home city: {city}")
+        if preferred_locs:
+            lines.append(f"  Preferred locations: {_fmt_list(preferred_locs)}")
+        if acceptable_locs:
+            lines.append(f"  Acceptable locations: {_fmt_list(acceptable_locs)}")
+        if loc_flex:
+            flex_label = str(loc_flex).strip().capitalize()
+            lines.append(f"  Location flexibility: {flex_label}")
+    elif not is_missing(city):
+        add("City", city)
+
     add("Interest", profile.get("interest"))
     add("Program type", profile.get("program_type"))
     add("Work mode", profile.get("work_mode"))
@@ -694,9 +764,6 @@ def _profile_field_lines(profile: dict[str, Any], compact: bool) -> list[str]:
         lines.append(f"  Interview pref.: {interview}")
 
     if not compact:
-        preferred = profile.get("preferred_locations") or []
-        if preferred:
-            lines.append(f"  Preferred locations: {_fmt_list(preferred)}")
         quals = profile.get("qualifications") or []
         if quals:
             lines.append(f"  Qualifications: {_fmt_list(quals)}")
@@ -909,38 +976,17 @@ def _format_score_breakdown(breakdown: dict[str, Any] | None) -> str:
     return " | ".join(parts)
 
 
-def print_recommendation_details(rec: dict[str, Any]) -> None:
+def print_recommendation_details(
+    rec: dict[str, Any],
+    profile: dict[str, Any] | None = None,
+) -> None:
     rank = rec.get("rank", "?")
     _safe_print(f"\n{_section_header(f'Details #{rank}')}")
-    _safe_print(f"  Company:           {rec.get('company', '?')}")
-    _safe_print(f"  Title:             {rec.get('title', '?')}")
-    _safe_print(f"  Match score:       {rec.get('match_score', 0)}%")
-    _safe_print(f"  Score source:      {rec.get('score_source', 'rubric')}")
-    breakdown_line = _format_score_breakdown(rec.get("score_breakdown"))
-    if breakdown_line:
-        _safe_print(f"  Score breakdown:   {breakdown_line}")
-    ml_score = rec.get("ml_score")
-    ml_source = rec.get("ml_score_source") or ""
-    if ml_score is not None:
-        ml_label = f"({ml_source})" if ml_source else ""
-        _safe_print(f"  ML score:          {ml_score}% {ml_label}".rstrip())
-    else:
-        _safe_print("  ML score:          not available")
-    _safe_print(f"  Role cluster:      {rec.get('role_cluster') or '(none)'}")
-    _safe_print(f"  City:              {rec.get('city', '')}")
-    _safe_print(f"  Work mode:         {rec.get('work_mode', '')}")
-    _safe_print(f"  Program type:      {rec.get('program_type', '')}")
-    _safe_print(f"  Interview:         {rec.get('interview_required', 'Not stated')}")
-    _safe_print(f"  Matched skills:    {_fmt_list(rec.get('skills_matched'))}")
-    _safe_print(f"  Missing skills:    {_fmt_list(rec.get('missing_skills'))}")
-    why = rec.get("why_recommended") or []
-    why_text = " • ".join(why) if why else "(none)"
-    _safe_print(f"  Why recommended:   {why_text}")
-    source = (rec.get("source_url") or "").strip()
-    if source:
-        _safe_print(f"  Source URL:        {source}")
-    else:
-        _safe_print("  Source URL:        (none)")
+    for line in format_details_lines(rec, profile):
+        if line == "":
+            _safe_print("")
+        else:
+            _safe_print(f"  {line}")
     _safe_print()
 
 
@@ -1074,12 +1120,7 @@ def print_turn_result(
 # ---------------------------------------------------------------------------
 
 def prompt_startup_auth() -> tuple[str, str | None]:
-    _safe_print("Welcome to CareerFinder.ai terminal chat.")
-    _safe_print(f"Backend: {API_BASE}")
-    _safe_print()
-    _safe_print("[1] Continue as guest")
-    _safe_print("[2] Login placeholder")
-    _safe_print()
+    print_welcome_menu()
 
     while True:
         choice = input("Choose 1 or 2: ").strip()
@@ -1123,6 +1164,28 @@ def parse_rank_command(parts: list[str]) -> int | None:
 # Send/rerun helper (used by normal turns and /undo)
 # ---------------------------------------------------------------------------
 
+def print_guidance_only(reply: str) -> None:
+    """Assistant reply without profile block, scan line, or Top N."""
+    _safe_print()
+    _safe_print(_section_header("Assistant"))
+    for reply_line in reply.split("\n"):
+        _safe_print(f"  {reply_line}")
+    _safe_print()
+
+
+def _profile_from_parsed(parsed: Any) -> dict[str, Any]:
+    if hasattr(parsed, "model_dump"):
+        return parsed.model_dump()
+    return dict(parsed)
+
+
+def _local_guidance_reply(combined: str) -> str:
+    profile = parse_message(combined)
+    if is_greeting_only(combined, profile):
+        return build_greeting_reply(combined)
+    return build_guidance_reply(combined, profile)
+
+
 def _send_and_render(
     user_messages: list[str],
     output_mode: OutputMode,
@@ -1136,6 +1199,13 @@ def _send_and_render(
     showing the previous successful state.
     """
     combined = "\n".join(user_messages)
+    parsed = parse_message(combined)
+
+    if not should_recommend(combined, parsed):
+        reply = _local_guidance_reply(combined)
+        print_guidance_only(reply)
+        return _profile_from_parsed(parsed), [], prev_top_score
+
     _safe_print(f"Calling POST {API_BASE}/recommend ...")
     try:
         response = post_recommend(combined)
@@ -1146,7 +1216,11 @@ def _send_and_render(
     new_profile: dict[str, Any] = response.get("profile") or {}
     new_recommendations: list[dict[str, Any]] = response.get("recommendations") or []
     total = response.get("total_candidates", 0)
-    reply = format_assistant_block(new_profile, new_recommendations)
+    reply = format_assistant_block(new_profile, new_recommendations, message=combined)
+
+    if not new_recommendations:
+        print_guidance_only(reply or _local_guidance_reply(combined))
+        return new_profile, [], prev_top_score
 
     new_top_score: int | None = (
         int(new_recommendations[0].get("match_score", 0))
@@ -1177,6 +1251,9 @@ def _send_and_render(
 
 def main() -> int:
     print_logo()
+    if not check_backend_health():
+        print_backend_unavailable()
+        return 1
     session_mode, login_email = prompt_startup_auth()
 
     user_messages: list[str] = []
@@ -1185,8 +1262,7 @@ def main() -> int:
     prev_top_score: int | None = None
     output_mode: OutputMode = "compact"
 
-    _safe_print("Type your profile in natural language, or /help for commands.")
-    _safe_print("Default view: compact. Use /verbose for full cards.\n")
+    _safe_print()
 
     while True:
         try:
@@ -1251,14 +1327,22 @@ def main() -> int:
                 _safe_print("Output mode: split.\n")
             continue
 
-        if lower == "/clear":
+        if lower in ("/reset", "/home"):
             user_messages.clear()
             latest_profile = None
             latest_recommendations = []
             prev_top_score = None
+            output_mode = "compact"
+            session_mode = "guest"
+            login_email = None
+            show_home_screen()
+            _safe_print("Session reset. Welcome back.\n")
+            continue
+
+        if lower == "/clear":
             clear_screen()
             print_logo()
-            _safe_print("Conversation cleared.\n")
+            _safe_print("Screen cleared. Session unchanged (/reset clears state).\n")
             continue
 
         if lower == "/guest":
@@ -1348,7 +1432,7 @@ def main() -> int:
             if rec is None:
                 _safe_print(f"No recommendation at rank #{rank}.\n")
                 continue
-            print_recommendation_details(rec)
+            print_recommendation_details(rec, latest_profile)
             continue
 
         if parts and parts[0] == "/open":
@@ -1379,9 +1463,22 @@ def main() -> int:
 
         # ----- Normal user message -----
         user_messages.append(stripped)
+        combined = "\n".join(user_messages)
+        parsed_combined = parse_message(combined)
+        skip_recommend = not should_recommend(combined, parsed_combined)
 
-        # Part B: echo + loading pattern + POST line.
         echo_user_input(stripped)
+        if skip_recommend:
+            reply = _local_guidance_reply(combined)
+            print_guidance_only(reply)
+            if is_greeting_only(stripped, parsed_combined):
+                user_messages.pop()
+            else:
+                latest_profile = _profile_from_parsed(parsed_combined)
+                latest_recommendations = []
+                prev_top_score = None
+            continue
+
         show_loading_pattern("Analyzing profile")
 
         new_profile, new_recommendations, new_top_score = _send_and_render(

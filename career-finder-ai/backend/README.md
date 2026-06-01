@@ -6,27 +6,61 @@ FastAPI backend for the AI-Powered Career Finder.
 
 ## Quick Start
 
-### Windows
+Run these from the **`career-finder-ai`** repository root unless noted.
+
+### Backend API
+
+```bash
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir backend
+```
+
+Then open: <http://127.0.0.1:8000/docs>
+
+### Terminal CLI
+
+```bash
+python scripts/careerfinder_cli.py
+```
+
+### Frontend (separate terminal)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Use a **full** `npm install` (not `--omit=dev`) so `@playwright/test` is present for `npm run build`. On PowerShell, if scripts are blocked, use `npm.cmd run dev` / `npm.cmd run build`.
+
+### Final demo smoke (no HTTP)
+
+```bash
+python scripts/final_demo_smoke.py
+```
+
+See `docs/reports/final_demo_script.md` and `docs/reports/final_qa_lock.md`.
+
+### Virtual environment (first-time setup)
+
+**Windows**
 
 ```bash
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
 ```
 
-### macOS / Linux
+**macOS / Linux**
 
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
 ```
 
-Then open: <http://127.0.0.1:8000/docs>
+Then use the uvicorn command above from the repo root.
 
 ---
 

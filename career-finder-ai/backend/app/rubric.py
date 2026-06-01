@@ -17,6 +17,7 @@ from app.opportunity_enrichment import enrich_opportunity_signals
 from app.schemas import Opportunity, ParsedProfile
 from app.taxonomy import (
     INTEREST_OPPORTUNITY_KEYWORDS,
+    SKILL_ALIASES,
     opportunity_keywords_for_interest,
 )
 
@@ -144,7 +145,48 @@ _STUDENT_SKILL_SATISFIES: dict[str, frozenset[str]] = {
     "siem": frozenset({"siem"}),
     "networking": frozenset({"networking", "network security", "network fundamentals"}),
     "linux": frozenset({"linux"}),
+    "kubernetes": frozenset({"kubernetes", "k8s"}),
+    "k8s": frozenset({"kubernetes", "k8s"}),
+    "power bi": frozenset({"power bi", "powerbi"}),
+    "powerbi": frozenset({"power bi", "powerbi"}),
+    "node.js": frozenset({"node.js", "nodejs", "node js"}),
+    "nodejs": frozenset({"node.js", "nodejs", "node js"}),
 }
+
+_EXTRA_SKILL_COMPARE: dict[str, str] = {
+    "power bi": "powerbi",
+    "node js": "nodejs",
+    "node.js": "nodejs",
+    "nodejs": "nodejs",
+    "powerbi": "powerbi",
+    "api": "apis",
+    "apis": "apis",
+    "rest api": "apis",
+    "rest apis": "apis",
+    "api development": "apis",
+}
+
+
+def _compact_skill_token(value: str) -> str:
+    return re.sub(r"[\s.\-_/+]+", "", normalize_text(value))
+
+
+def _skill_compare_forms(token: str) -> set[str]:
+    norm = normalize_text(token)
+    forms = {norm, _compact_skill_token(norm)}
+    if norm in SKILL_ALIASES:
+        canonical = SKILL_ALIASES[norm]
+        forms.add(canonical)
+        forms.add(_compact_skill_token(canonical))
+    for alias, canonical in SKILL_ALIASES.items():
+        if alias == norm or canonical == norm:
+            forms.add(_compact_skill_token(alias))
+            forms.add(_compact_skill_token(canonical))
+    if norm in _EXTRA_SKILL_COMPARE:
+        canonical = _EXTRA_SKILL_COMPARE[norm]
+        forms.add(canonical)
+        forms.add(_compact_skill_token(canonical))
+    return forms
 
 
 # ---------------------------------------------------------------------------
@@ -463,15 +505,25 @@ def compute_city_match_score(profile: ParsedProfile, opportunity: Opportunity) -
 
     preferred = {normalize_text(c) for c in profile.preferred_locations}
     preferred.discard("")
+    acceptable = {normalize_text(c) for c in profile.acceptable_locations}
+    acceptable.discard("")
     student_city = normalize_text(profile.city)
+    home_city = normalize_text(profile.home_city) or student_city
 
-    if opp_city in preferred:
+    if preferred and opp_city in preferred:
         return 1.0
 
     if student_city and student_city == opp_city:
         return 1.0
 
-    if student_city in EASTERN_PROVINCE and opp_city in EASTERN_PROVINCE:
+    if home_city and home_city == opp_city:
+        return 1.0
+
+    if acceptable and opp_city in acceptable:
+        return 0.85
+
+    anchor = home_city or student_city
+    if anchor in EASTERN_PROVINCE and opp_city in EASTERN_PROVINCE:
         return 0.7
 
     if opp_city in FLEXIBLE_CITIES:
@@ -480,7 +532,7 @@ def compute_city_match_score(profile: ParsedProfile, opportunity: Opportunity) -
     if _normalize_work_mode(opportunity.work_mode) == "remote":
         return 0.5
 
-    if not student_city and not preferred:
+    if not student_city and not home_city and not preferred and not acceptable:
         return 0.5
 
     return 0.0
@@ -558,7 +610,9 @@ def compute_interview_score(
             return 0.2
         return 0.5
 
-    if preference == "Interview preferred":
+    if preference == "Interview preferred" or (
+        preference and preference.startswith("Interview preferred:")
+    ):
         if requirement == "Required":
             return 1.0
         if requirement == "Not required":
@@ -664,7 +718,11 @@ def _student_covers_skill(student: set[str], opportunity_skill: str) -> bool:
         return True
     if norm in student:
         return True
+
+    opp_forms = _skill_compare_forms(norm)
     for token in student:
+        if opp_forms & _skill_compare_forms(token):
+            return True
         if norm in _STUDENT_SKILL_SATISFIES.get(token, frozenset()):
             return True
         if len(token) >= 5 and token in norm:

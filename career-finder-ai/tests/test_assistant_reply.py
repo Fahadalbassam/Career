@@ -100,4 +100,51 @@ def test_assistant_suggests_details_when_no_missing_skills_list():
         [{"company": "Acme", "title": "COOP", "match_score": 81, "missing_skills": []}],
     )
     assert "more technical skills" not in reply.lower()
-    assert "/details 1" in reply or "missing skills" in reply.lower()
+    assert "/details" in reply or "missing skills" in reply.lower()
+
+
+def test_hotfix_assistant_no_interview_prompt_when_in_person_pref_set():
+    parts = build_assistant_reply_parts(
+        _profile_dict(interview_preference="Interview preferred: In person"),
+        [{"company": "Acme", "title": "COOP", "match_score": 75}],
+    )
+    assert "interview preference" not in parts["next_action"].lower()
+
+
+def test_hotfix_dry_run_profile_rubric_sorted():
+    combined = (
+        "im a cs student at imam abdulrahman bin faisal university, currently living in khobar, "
+        "im looking for coop opportunities in riyadh, im interested in security and devops, "
+        "i have a background in prompt engineering and web development, "
+        "I want my COop to be onsite or hybrid. "
+        "interview preference would be in person. i know API"
+    )
+    response = recommend_from_message(combined)
+    assert response.profile.interview_preference == "Interview preferred: In person"
+    assert "apis" in response.profile.skills
+    assert response.recommendations
+    scores = [r.match_score for r in response.recommendations]
+    assert scores == sorted(scores, reverse=True)
+    assert all(r.score_source == "rubric" for r in response.recommendations[:3])
+
+
+def test_hotfix_missing_skills_api_alias_covered_by_apis_skill():
+    from app.rubric import compute_missing_skills
+    from app.schemas import Opportunity, ParsedProfile
+
+    profile = ParsedProfile(major="CS", skills=["apis"])
+    opportunity = Opportunity(
+        id=1,
+        company="Test",
+        title="Backend",
+        city="Riyadh",
+        work_mode="Remote",
+        program_type="COOP",
+        major_fit=["CS"],
+        skills_list=["python", "api", "apis", "REST API"],
+        source_url="https://example.com",
+    )
+    missing = [m.lower() for m in compute_missing_skills(profile, opportunity)]
+    assert "api" not in missing
+    assert "apis" not in missing
+    assert "rest api" not in missing

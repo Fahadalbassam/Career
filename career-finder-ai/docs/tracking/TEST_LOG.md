@@ -564,3 +564,145 @@ npm run build
 **Result:** **202 passed** in ~23s. Debug script: Bank Albilad **86%** rank #1; missing skills exclude fundamentals when `cybersecurity` present. Terminal capture: `docs/reports/final_demo_lock_capture.txt` — profile + top 5 (86/84/84/84/82) + `/details 1` with score breakdown. Lint pass; build pass.
 
 **E2E:** Not re-run in this lock pass (optional; prior FINAL-QA-1: 11/11 passed).
+
+---
+
+## 2026-05-31 — SPRINT-1
+
+```bash
+cd career-finder-ai/backend
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py \
+  tests/test_assistant_reply.py tests/test_cli_ml_commands.py tests/test_scoring.py -q
+cd ../frontend
+npm run lint
+npm run build
+```
+
+**Result:** **254 passed** in ~34s. Lint pass (0 errors). Build fails TypeScript check: `playwright.config.ts` cannot resolve `@playwright/test` (devDependency not installed in this environment; pre-existing).
+
+**New/updated tests:** SPRINT-1 location parser cases in `test_parser.py`; location scoring ordering in `test_scoring.py`; CLI help/reset/home/clear smoke in `test_cli_ml_commands.py`.
+
+---
+
+## 2026-05-31 — SPRINT-1.1 (frontend build fix)
+
+```bash
+cd career-finder-ai/frontend
+npm install
+npm run lint
+npm run build
+cd ../backend
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py \
+  tests/test_assistant_reply.py tests/test_cli_ml_commands.py tests/test_scoring.py -q
+```
+
+**Result:** `npm install` added missing dev packages (including `@playwright/test`). **Lint pass.** **Build pass** (Next.js 16.2.4, TypeScript check includes `playwright.config.ts` successfully). **254 pytest passed** in ~14s.
+
+**Note:** `@playwright/test` was already in `package.json` / `package-lock.json`; no manifest edits required. Use full `npm install` (not `--omit=dev`) before `npm run build`.
+
+---
+
+## 2026-05-31 — SPRINT-2
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py \
+  tests/test_assistant_reply.py tests/test_cli_ml_commands.py tests/test_scoring.py \
+  tests/test_role_inference.py -q
+cd frontend
+npm run lint
+npm run build
+```
+
+**Result:** **301 passed** in ~15s. Lint pass. Build pass (Next.js 16.2.4).
+
+**New tests:** `tests/test_role_inference.py` — SQL ambiguity, role stacks (Power BI, Airflow, full stack, cyber ops, cloud/devops), game-dev + security transition, discovery mode, assistant one-question rule, `match_score` / `score_source=rubric` integrity.
+
+**Confirmation:** No ML retrain. No dataset changes. Ranking remains rubric-based.
+
+---
+
+## 2026-05-31 — SPRINT-3
+
+```bash
+cd career-finder-ai/backend
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py \
+  tests/test_assistant_reply.py tests/test_cli_ml_commands.py tests/test_scoring.py \
+  tests/test_role_inference.py tests/test_recommendation_explanation.py -q
+cd ../frontend
+npm run lint
+npm run build
+```
+
+**Result:** **315 passed** in ~19s. Lint pass. Build pass (Next.js 16.2.4).
+
+**New tests:** `tests/test_recommendation_explanation.py` — `/details` sections, missing-skill alias cleanup (cybersecurity, SIEM, Power BI, Node.js), next-best-action concreteness, broad location honesty, interview not stated, role-family evidence, sort/score integrity.
+
+**Manual CLI:** guest → cyber Khobar COOP demo → `/details 1` — Bank Albilad 86%, broad location + interview not stated, concrete missing skills, structured breakdown.
+
+**Confirmation:** No ML retrain. No dataset changes. Ranking rubric-based. Scores not artificially raised.
+
+---
+
+## 2026-05-31 — SPRINT-4
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_recommender.py tests/test_input_robustness.py \
+  tests/test_assistant_reply.py tests/test_cli_ml_commands.py tests/test_scoring.py \
+  tests/test_role_inference.py tests/test_recommendation_explanation.py -q
+python scripts/final_demo_smoke.py
+cd frontend
+npm run lint
+npm run build
+```
+
+**Result:** **315 passed** in ~22s. `final_demo_smoke.py` → **PASS (4/4)** — Bank Albilad **86%** #1, `score_source=rubric`. `npm run lint` pass; `npm run build` pass (Next.js 16.2.4).
+
+**New automation:** `scripts/final_demo_smoke.py` — discovery, SQL ambiguity, location flexibility, full demo rubric/sort/details/missing-skills checks.
+
+**Docs:** `docs/reports/final_demo_script.md`, `docs/reports/final_qa_lock.md`.
+
+**Confirmation:** No ML retrain. No dataset changes. No rubric weight changes. Ranking `score_source=rubric`.
+
+---
+
+## 2026-06-01 — HOTFIX-4.1
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_cli_ml_commands.py tests/test_parser.py tests/test_recommender.py \
+  tests/test_assistant_reply.py tests/test_recommendation_explanation.py tests/test_role_inference.py \
+  tests/test_input_robustness.py tests/test_input_intent.py -q
+python scripts/final_demo_smoke.py
+cd frontend
+npm run lint
+npm run build
+```
+
+**New tests:** `tests/test_input_intent.py` — compact header (no ASCII logo), greeting/noise detection, gating on `/recommend`, full demo still recommends, backend-unavailable message includes `--app-dir backend`.
+
+**Manual CLI:** `hey` / `ehy` → assistant prompt only (no Scanned / Top 5); `I know SQL` and `I don't know what role I want` → guidance without weak Top 5; full cyber Khobar COOP demo → Bank Albilad ~86%, `score_source=rubric`.
+
+**Confirmation:** No ML retrain. No dataset/rubric/scoring/taxonomy changes.
+
+---
+
+## 2026-06-01 — HOTFIX-4.2
+
+```bash
+cd career-finder-ai
+python -m pytest tests/test_parser.py tests/test_cli_ml_commands.py tests/test_assistant_reply.py \
+  tests/test_recommender.py tests/test_recommendation_explanation.py tests/test_input_intent.py \
+  tests/test_input_robustness.py -q
+python scripts/final_demo_smoke.py
+cd frontend
+npm run lint
+npm run build
+```
+
+**New/updated tests:** `tests/test_parser.py` — HOTFIX-4.2 interview phrases, COOP onsite/hybrid vs interview, API/`REST APIs` → `apis`, multi-turn merge; `tests/test_assistant_reply.py` — no interview prompt when preference set, dry-run rubric sort, API missing-skill alias coverage.
+
+**Manual CLI:** Full Khobar security/devops profile → follow-up `interview preference would be in person` shows interview pref. and assistant stops asking; `i know API` adds `apis` and clears API alias from missing skills on `/details 1`.
+
+**Confirmation:** No ML retrain. No dataset/rubric-weight/ranking changes.
