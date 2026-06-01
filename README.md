@@ -4,15 +4,15 @@
 
 ## Project Summary
 
-**Career Finder AI** recommends COOP and internship opportunities specifically tailored for Saudi computing students. The system combines:
+**CareerFinder.ai** recommends COOP and internship opportunities for Saudi computing students. The implemented system combines:
 
 - A **cleaned, verified dataset** of Saudi COOP/internship opportunities
-- An **ML fit classifier** that predicts how well an opportunity matches a student's background
-- An **explainable ranking engine** with transparent scoring components
-- A **chat-style interface** where students describe their needs in plain language
-- An **optional LLM layer** (AWS Bedrock or similar) that can be added later for natural language parsing and explanation generation
+- A **rule-based parser** that extracts structured profile fields from natural-language input
+- An **explainable rubric-based ranking engine** (live recommendations; transparent score breakdown)
+- **Supervised regression ML** trained and evaluated offline (0–100 score prediction; optional shadow comparison; does not replace live rubric ranking)
+- A **Next.js frontend**, **FastAPI backend**, and **terminal CLI** for demos and testing
 
-The system is designed to run **entirely locally** without any cloud dependencies in its base configuration.
+The stack runs **locally** without external LLM or cloud API dependencies.
 
 ---
 
@@ -46,50 +46,35 @@ This project centralises that information and recommends the most suitable oppor
 
 ## Main Features
 
-- 🔍 **Student question parser** — extracts structured filters from free-text input
-- 🎓 **Major / city / work mode / program type extraction**
-- 🤖 **ML fit classification** — High, Medium, or Low fit
-- 🏆 **Top 5 recommendation ranking** with explainable scores
-- 📊 **Verified source links** for each opportunity
-- 📈 **Dataset dashboard** (planned)
-- ☁️ **Optional AWS Bedrock explanation generator** (can be added later)
+- **Rule-based student question parser** — major, city, skills, work mode, program type, and related fields
+- **Rubric-based live ranking** — weighted, explainable 0–100 `match_score` with per-component breakdown
+- **Supervised regression ML** — fair and rubric-assisted models for evaluation and report metrics (see `docs/reports/`)
+- **Top recommendations** with `why_recommended`, matched/missing skills, and verified source links
+- **Web UI** (`/`, `/chat`, `/search`, `/methodology`, `/model`) and **terminal CLI** wired to `/parse` and `/recommend`
 
 ---
 
 ## System Architecture
 
 ```
-Student Question
+Student message (web or CLI)
       │
       ▼
-   Parser
+Rule-based parser  →  structured profile
       │
       ▼
-   Filters  ──────────────────────────────────────┐
-      │                                            │
-      ▼                                            │
-Candidate Opportunities                            │
-      │                                            │
-      ▼                                            │
-ML Fit Classifier                                  │
-      │                                            │
-      ▼                                            │
-Weighted Ranking                                   │
-  ├─ major_fit_score    (35%)                      │
-  ├─ city_match         (25%)                      │
-  ├─ work_mode_match    (20%)                      │
-  ├─ interest_match     (15%)                      │
-  └─ verified_bonus     ( 5%)                      │
-      │                                            │
-      ▼                                            │
-Top 5 Recommendations                              │
-      │                                            │
-      ▼                                            │
-Explanation Generator ◄────────────────────────────┘
+Candidate opportunities (cleaned dataset)
       │
       ▼
-      UI
+Rubric scoring  →  live ranking (0–100 match_score, breakdown, explanations)
+      │
+      ├─ optional ML shadow score (evaluation / comparison only)
+      │
+      ▼
+Top recommendations  →  FastAPI  →  Next.js UI / terminal CLI
 ```
+
+Offline ML pipeline (reproducibility): regression dataset build → fair/rubric-assisted model training → metrics and rubric-vs-ML comparison reports in `docs/reports/`.
 
 ---
 
@@ -414,20 +399,15 @@ python -m app.evaluate
 
 ---
 
-## Optional Frontend Setup (Later)
-
-> ⚠️ **Do not start frontend polishing before the backend recommender works.**
-
-When the team is ready, set up Next.js + shadcn/ui:
+## Frontend Setup
 
 ```bash
-cd frontend
-npx create-next-app@latest . --typescript --tailwind --eslint --app
-npx shadcn@latest init
-npx shadcn@latest add button card input badge select textarea separator tabs dialog
+cd career-finder-ai/frontend
+npm install
+npm run dev
 ```
 
-See `frontend/README.md` for planned pages and component details.
+See `career-finder-ai/frontend/README.md` for routes and components. Run `npm run lint` and `npm run build` before submission.
 
 ---
 
@@ -481,7 +461,7 @@ cp .env.example .env
 | **Member 1** | Dataset cleaning and data dictionary |
 | **Member 2** | ML model training and evaluation |
 | **Member 3** | Recommendation engine and backend logic |
-| **Member 4** | UI and optional AWS/LLM integration |
+| **Member 4** | Frontend UI, CLI, and integration QA |
 | **Member 5** | Report, README, QA, and project management |
 
 ---

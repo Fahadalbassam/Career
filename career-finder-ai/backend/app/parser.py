@@ -2,7 +2,8 @@
 parser.py – Rule-based student message parser.
 
 Extracts structured profile fields from free-text input without requiring
-an external LLM.  A Bedrock/LLM integration can replace or augment this
+an external LLM. Future extensions could add semantic parsing, but the live
+system uses deterministic rules only.
 module later.
 """
 

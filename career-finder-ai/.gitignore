@@ -14,9 +14,12 @@ env/
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 
 # Environment variables (NEVER commit these)
 .env
+.env.*
+!.env.example
 
 # Databases
 *.db
@@ -35,17 +38,19 @@ node_modules/
 .next/
 dist/
 .npm/
+build/
 
-# macOS
+# macOS / Windows
 .DS_Store
+Thumbs.db
 
-# VS Code local config (keep extensions.json and settings.json)
+# VS Code local config (keep extensions.json)
+.vscode/settings.json
 .vscode/.ropeproject/
+.cursor/
 
 # Build artefacts
-build/
 *.egg-info/
-dist/
 
 # Test and coverage artefacts
 .pytest_cache/
@@ -53,10 +58,33 @@ backend/.pytest_cache/
 backend/pytest-cache-files-*/
 .coverage
 htmlcov/
+coverage/
+.mypy_cache/
+.ruff_cache/
+.cache/
+playwright-report/
+test-results/
 
-# Manual CLI capture logs (local smoke tests)
+# Logs and temp files
+*.log
+*.tmp
+*.bak
 cli_out*.txt
 backend/cli_out*.txt
 
+# Internal planning / scratch (not for submission)
+docs/tracking/
+docs/scratch/
+docs/prompts/
+docs/context/
+docs/planning/
+docs/audits/
+Pasted*.md
+Pasted*.txt
+*_draft.*
+*_backup.*
+*_old.*
+
+# Manual CLI capture logs (local smoke tests)
 # Archived legacy generated outputs (see data/archive/README.md)
 data/archive/
