@@ -174,6 +174,8 @@ The interactive Swagger UI lets you test all endpoints directly in the browser.
 
 ### Final demo stack (SPRINT-4 — from `career-finder-ai/`)
 
+**Terminal-focused documentation:** [career-finder-ai/docs/README_TERMINAL.md](career-finder-ai/docs/README_TERMINAL.md) — CLI commands, rubric vs ML pipeline, datasets, and presentation demo script.
+
 ```bash
 # Backend
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir backend
