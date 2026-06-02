@@ -11,6 +11,7 @@ import pytest
 from app.parser import parse_message
 from app.recommendation_explanation import (
     build_next_best_action,
+    build_why_this_score_lines,
     describe_location_fit,
     format_details_lines,
 )
@@ -100,6 +101,28 @@ def test_broad_location_described_honestly():
     text = "\n".join(lines)
     if label in {"regional", "broad"}:
         assert "not an exact city match" in text.lower() or "broad location" in text.lower()
+
+
+def test_details_explains_score_with_positive_and_limiting_factors(capsys, cli):
+    profile, rec = _sprint3_profile_and_rec()
+    cli.print_recommendation_details(rec, profile)
+    out = capsys.readouterr().out
+    assert "Why this score:" in out
+    assert "Positive factors:" in out
+    assert "Limiting factors:" in out
+    assert 80 <= float(rec["match_score"]) <= 90
+    assert "not an exact city match" in out.lower() or "broad" in out.lower()
+    assert "does not state interview" in out.lower()
+
+
+def test_why_this_score_mentions_interview_not_stated_not_a_match():
+    profile, rec = _sprint3_profile_and_rec()
+    if (rec.get("interview_required") or "Not stated") != "Not stated":
+        pytest.skip("top listing states interview requirement")
+    lines = build_why_this_score_lines(rec, profile)
+    text = "\n".join(lines).lower()
+    assert "not stated" in text
+    assert "not scored as an interview match" in text or "neutral" in text
 
 
 def test_interview_not_stated_described_honestly():

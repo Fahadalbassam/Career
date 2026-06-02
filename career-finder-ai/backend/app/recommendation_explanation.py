@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from app.rubric import FLEXIBLE_CITIES, normalize_text
+from app.rubric import FLEXIBLE_CITIES, TARGET_WEIGHTS, normalize_text
 
 FIT_STRONG = 0.85
 FIT_PARTIAL = 0.55
 FIT_WEAK = 0.35
-
+FIT_LIMITING = 0.70
 
 def _fit_strength(score: float) -> str:
     if score >= FIT_STRONG:
@@ -90,15 +90,16 @@ def describe_interview_fit(
     if requirement == "Not stated":
         return "not stated"
     pref = (profile or {}).get("interview_preference")
-    if pref:
-        if score >= 0.9:
-            return "matches preference"
-        if score <= 0.3:
-            return "mismatch"
     if requirement == "Required":
-        return "matches preference" if pref and score >= 0.75 else "required (per source)"
+        if pref and score >= 0.75:
+            return "matches preference"
+        return "required (per source)"
     if requirement == "Not required":
+        if pref and score >= 0.75:
+            return "matches preference"
         return "not required (per source)"
+    if pref and score <= 0.3:
+        return "mismatch"
     return "not stated"
 
 
@@ -222,6 +223,8 @@ def build_why_matched_lines(
         lines.append("The source does not state interview requirements.")
     elif interview_label == "matches preference":
         lines.append("Interview requirement appears to match your preference.")
+    elif interview_label == "mismatch":
+        lines.append("Interview requirement may conflict with your preference.")
 
     if not lines:
         lines.append("Recommended based on overall profile similarity.")
@@ -288,6 +291,114 @@ def build_score_breakdown_lines(
     return lines
 
 
+def _weighted_points(component_key: str, score: float) -> float:
+    return TARGET_WEIGHTS[component_key] * score * 100.0
+
+
+def build_why_this_score_lines(
+    rec: Dict[str, Any],
+    profile: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Explain the headline match % with honest positive and limiting factors."""
+    profile = profile or {}
+    breakdown = rec.get("score_breakdown") or {}
+    match_score = float(rec.get("match_score", 0))
+    lines: List[str] = [
+        f"The {match_score:.0f}% score is the weighted rubric total (see breakdown below).",
+    ]
+
+    positives: List[str] = []
+    limits: List[str] = []
+
+    major = float(breakdown.get("major_fit_score", 0))
+    if major >= FIT_STRONG:
+        positives.append(
+            f"Strong major fit ({profile.get('major') or 'your major'} aligns with the listing)."
+        )
+
+    role = float(breakdown.get("role_interest_score", 0))
+    if role >= FIT_STRONG:
+        interest = profile.get("interest") or ""
+        roles = profile.get("preferred_roles") or []
+        role_hint = roles[0] if roles else interest
+        positives.append(
+            f"Strong role/interest alignment ({role_hint or 'your direction'})."
+        )
+
+    prog = float(breakdown.get("program_type_score", 0))
+    if prog >= FIT_STRONG:
+        positives.append(
+            f"Program type matches ({rec.get('program_type') or profile.get('program_type')})."
+        )
+
+    wm = float(breakdown.get("work_mode_score", 0))
+    if wm >= FIT_STRONG:
+        positives.append(
+            f"Work mode matches your preference ({rec.get('work_mode') or profile.get('work_mode')})."
+        )
+
+    ver = float(breakdown.get("verification_score", 0))
+    if ver >= FIT_STRONG and (rec.get("source_url") or "").strip():
+        positives.append("Verified source link is available.")
+
+    skill = float(breakdown.get("skill_match_score", 0))
+    missing = rec.get("missing_skills") or []
+    matched = rec.get("skills_matched") or []
+    if skill < FIT_LIMITING:
+        gap_note = ""
+        if missing:
+            gap_note = f" — gaps include {', '.join(missing[:3])}"
+        limits.append(
+            f"Skill overlap is only partial ({len(matched)} matched, {len(missing)} missing"
+            f"{gap_note}); skills rubric contributes ~{_weighted_points('skill_match_score', skill):.0f} of 100."
+        )
+
+    city = float(breakdown.get("city_match_score", 0))
+    loc_label = describe_location_fit(city, profile, rec)
+    student_city = profile.get("city") or ""
+    opp_city = rec.get("city") or ""
+    if loc_label in {"broad", "regional", "partial", "no match"}:
+        limits.append(
+            f"Location is {loc_label} ({opp_city or 'listing'} vs your {student_city or 'area'}) — "
+            f"not an exact city match; location rubric contributes "
+            f"~{_weighted_points('city_match_score', city):.0f} of 100."
+        )
+    elif city < FIT_LIMITING and opp_city:
+        limits.append(
+            f"Location fit is limited ({opp_city}); location rubric contributes "
+            f"~{_weighted_points('city_match_score', city):.0f} of 100."
+        )
+
+    interview_req = rec.get("interview_required") or "Not stated"
+    interview_score = float(breakdown.get("interview_score", 0.5))
+    interview_pref = profile.get("interview_preference")
+    if interview_req == "Not stated" and interview_pref:
+        limits.append(
+            "Interview requirements are not stated on the source — this is not scored as an "
+            "interview match; your preference is neutral until the posting is confirmed."
+        )
+    elif interview_score < FIT_LIMITING and interview_pref:
+        limits.append(
+            "Interview fit is partial or mismatched relative to your preference."
+        )
+
+    if positives:
+        lines.append("Positive factors:")
+        for item in positives:
+            lines.append(f"  • {item}")
+    if limits:
+        lines.append("Limiting factors:")
+        for item in limits:
+            lines.append(f"  • {item}")
+    elif match_score < 95:
+        lines.append(
+            "Limiting factors: no single rubric dimension is far below threshold; "
+            "the score reflects several moderate components rather than a perfect fit."
+        )
+
+    return lines
+
+
 def build_next_best_action(
     rec: Dict[str, Any],
     profile: Optional[Dict[str, Any]] = None,
@@ -348,6 +459,14 @@ def format_details_lines(
     lines.append(f"Program:           {rec.get('title', '?')}")
     lines.append(f"Match score:       {rec.get('match_score', 0)}%")
     lines.append(f"Score source:      {rec.get('score_source', 'rubric')}")
+
+    lines.append("")
+    lines.append("Why this score:")
+    for item in build_why_this_score_lines(rec, profile):
+        if item.startswith("  •") or item.endswith(":"):
+            lines.append(item if item.startswith("  ") else f"  {item}")
+        else:
+            lines.append(f"  • {item}")
 
     ml_score = rec.get("ml_score")
     if ml_score is not None:

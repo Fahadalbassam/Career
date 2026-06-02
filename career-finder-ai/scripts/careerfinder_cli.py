@@ -848,7 +848,7 @@ def format_compact_header(widths: dict[str, int]) -> str:
         f"{'Score':<{widths['score']}}",
         f"{'Company':<{widths['company']}}",
         f"{'Program':<{widths['program']}}",
-        f"{'City':<{widths['city']}}",
+        f"{'Location':<{widths['city']}}",
         f"{'Mode':<{widths['mode']}}",
         f"{'Missing':<{widths['missing']}}",
     ]

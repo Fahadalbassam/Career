@@ -131,6 +131,13 @@ def test_greeting_guard():
     assert is_greeting_only("ehy", parse_message("ehy"))
 
 
+def test_compact_table_location_column_label(cli):
+    widths = cli._compact_column_widths(120)
+    header = cli.format_compact_header(widths)
+    assert "Location" in header
+    assert "City" not in header.split()
+
+
 def test_details_ml_score_not_available(capsys):
     cli = _load_cli_module()
     rec = {

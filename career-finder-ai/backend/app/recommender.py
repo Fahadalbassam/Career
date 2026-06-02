@@ -430,19 +430,10 @@ def build_recommendation_reasons(
     if opportunity.source_url:
         reasons.append("Has a source link for verification")
 
-    # 7. Skill matches
-    searchable_text = " ".join(
-        [
-            opportunity.title,
-            opportunity.requirements,
-            " ".join(opportunity.skills_list),
-        ]
-    ).lower()
+    # 7. Skill matches (opportunity-relevant layering; SCORE-AUDIT-2)
+    from app.rubric import compute_profile_skills_matched
 
-    skills_matched = [
-        skill for skill in profile.skills
-        if skill.lower() in searchable_text
-    ]
+    skills_matched = compute_profile_skills_matched(profile, opportunity)
 
     if skills_matched:
         reasons.append(

@@ -13,7 +13,11 @@ from __future__ import annotations
 import re
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from app.opportunity_enrichment import enrich_opportunity_signals
+from app.opportunity_enrichment import (
+    ROLE_SKILL_PROFILES,
+    enrich_opportunity_signals,
+    fired_role_skill_profile_keys,
+)
 from app.schemas import Opportunity, ParsedProfile
 from app.taxonomy import (
     INTEREST_OPPORTUNITY_KEYWORDS,
@@ -151,6 +155,61 @@ _STUDENT_SKILL_SATISFIES: dict[str, frozenset[str]] = {
     "powerbi": frozenset({"power bi", "powerbi"}),
     "node.js": frozenset({"node.js", "nodejs", "node js"}),
     "nodejs": frozenset({"node.js", "nodejs", "node js"}),
+    "git": frozenset({"git"}),
+    "apis": frozenset(
+        {
+            "apis",
+            "api",
+            "rest api",
+            "rest apis",
+            "api development",
+        }
+    ),
+    "api": frozenset(
+        {
+            "apis",
+            "api",
+            "rest api",
+            "rest apis",
+            "api development",
+        }
+    ),
+}
+
+# Student interest / preferred role -> ROLE_SKILL_PROFILES keys (SCORE-AUDIT-2).
+_INTEREST_PROFILE_KEYS: dict[str, frozenset[str]] = {
+    "cybersecurity": frozenset({"Cybersecurity", "Network Security"}),
+    "cloud / devops": frozenset({"Cloud / DevOps"}),
+    "software development": frozenset({"Backend Engineering", "Frontend Engineering"}),
+    "data science": frozenset({"Data Science"}),
+    "data engineering": frozenset({"Data Engineering"}),
+    "ai / machine learning": frozenset({"AI / Machine Learning"}),
+    "fintech": frozenset({"Backend Engineering"}),
+}
+
+_PREFERRED_ROLE_PROFILE_KEYS: List[Tuple[str, str]] = [
+    ("security operations", "Cybersecurity"),
+    ("soc analyst", "Cybersecurity"),
+    ("soc operations", "Cybersecurity"),
+    ("soc monitoring", "Cybersecurity"),
+    ("network security", "Network Security"),
+    ("network engineer", "Network Security"),
+    ("backend developer", "Backend Engineering"),
+    ("backend development", "Backend Engineering"),
+    ("frontend developer", "Frontend Engineering"),
+    ("full stack", "Backend Engineering"),
+    ("cloud / devops", "Cloud / DevOps"),
+    ("devops", "Cloud / DevOps"),
+    ("data scientist", "Data Science"),
+    ("data analyst", "Data Science"),
+    ("machine learning", "AI / Machine Learning"),
+]
+
+_SKILL_TIER_WEIGHTS: dict[str, float] = {
+    "explicit": 1.0,
+    "required": 0.7,
+    "preferred": 0.4,
+    "inferred": 0.5,
 }
 
 _EXTRA_SKILL_COMPARE: dict[str, str] = {
@@ -281,6 +340,172 @@ def _profile_skill_tokens(profile: ParsedProfile) -> List[str]:
     return normalize_list(tokens)
 
 
+def _clean_explicit_opportunity_skills(opportunity: Opportunity) -> List[str]:
+    """Declared ``skills_list`` entries, preserving display spelling."""
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in opportunity.skills_list or []:
+        cleaned = str(raw).strip()
+        normalized = cleaned.lower()
+        if not normalized or normalized in SKILL_NOISE_TOKENS:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(cleaned)
+    return out
+
+
+def _student_aligned_profile_keys(profile: ParsedProfile) -> set[str]:
+    """Role-profile keys implied by the student's interest and preferred roles."""
+    keys: set[str] = set()
+    interest = normalize_text(profile.interest)
+    if interest:
+        for label, profile_keys in _INTEREST_PROFILE_KEYS.items():
+            if label in interest or interest in label:
+                keys.update(profile_keys)
+    for role in normalize_list(profile.preferred_roles):
+        for needle, profile_key in _PREFERRED_ROLE_PROFILE_KEYS:
+            if needle in role:
+                keys.add(profile_key)
+    return keys
+
+
+def _filtered_role_profile_keys(
+    opportunity: Opportunity,
+    profile: Optional[ParsedProfile],
+) -> List[str]:
+    """Fired role profiles, narrowed to the student's interest when possible."""
+    fired = fired_role_skill_profile_keys(opportunity)
+    if profile is None:
+        return fired
+    aligned = _student_aligned_profile_keys(profile)
+    if not aligned:
+        return fired
+    filtered = [key for key in fired if key in aligned]
+    return filtered if filtered else fired
+
+
+def _dedupe_skill_tier_entries(
+    entries: Iterable[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    """Drop duplicate opportunity skills; keep the strongest tier per skill."""
+    tier_rank = {"explicit": 4, "required": 3, "preferred": 2, "inferred": 1}
+    best: dict[str, Tuple[str, str]] = {}
+    order: List[str] = []
+    for skill, tier in entries:
+        norm = str(skill).strip().lower()
+        if not norm or norm in SKILL_NOISE_TOKENS:
+            continue
+        if norm not in best:
+            order.append(norm)
+            best[norm] = (skill, tier)
+            continue
+        prev_tier = best[norm][1]
+        if tier_rank.get(tier, 0) > tier_rank.get(prev_tier, 0):
+            best[norm] = (skill, tier)
+    return [best[norm] for norm in order]
+
+
+def _role_profile_skill_entries(profile_keys: Sequence[str]) -> List[Tuple[str, str]]:
+    entries: List[Tuple[str, str]] = []
+    seen_required: set[str] = set()
+    for key in profile_keys:
+        profile = ROLE_SKILL_PROFILES.get(key)
+        if not profile:
+            continue
+        for skill in profile.get("required", []):
+            norm = str(skill).lower()
+            if norm in seen_required:
+                continue
+            seen_required.add(norm)
+            entries.append((skill, "required"))
+        for skill in profile.get("preferred", []):
+            if str(skill).lower() in seen_required:
+                continue
+            entries.append((skill, "preferred"))
+    return entries
+
+
+def _opportunity_relevant_skill_entries(
+    opportunity: Opportunity,
+    profile: Optional[ParsedProfile] = None,
+) -> List[Tuple[str, str]]:
+    """Layered opportunity skills for scoring (SCORE-AUDIT-2).
+
+  1. Explicit ``skills_list`` when present.
+    2. Role-cluster required / preferred from interest-filtered profiles.
+    3. Company-level bucket ``inferred_skills`` only when (1) and (2) are empty.
+    """
+    explicit = _clean_explicit_opportunity_skills(opportunity)
+    if explicit:
+        return [(skill, "explicit") for skill in explicit]
+
+    role_keys = _filtered_role_profile_keys(opportunity, profile)
+    role_entries = _role_profile_skill_entries(role_keys)
+    if role_entries:
+        return _dedupe_skill_tier_entries(role_entries)
+
+    inferred = enrich_opportunity_signals(opportunity).get("inferred_skills", []) or []
+    return [(str(skill), "inferred") for skill in inferred]  # type: ignore[arg-type]
+
+
+def _role_profile_skill_lists(
+    opportunity: Opportunity,
+    profile: Optional[ParsedProfile],
+) -> Tuple[List[str], List[str]]:
+    """Required and preferred lists from interest-filtered role profiles."""
+    keys = _filtered_role_profile_keys(opportunity, profile)
+    required: List[str] = []
+    preferred: List[str] = []
+    seen_required: set[str] = set()
+    for key in keys:
+        role_profile = ROLE_SKILL_PROFILES.get(key)
+        if not role_profile:
+            continue
+        for skill in role_profile.get("required", []):
+            norm = str(skill).lower()
+            if norm in seen_required:
+                continue
+            seen_required.add(norm)
+            required.append(skill)
+        for skill in role_profile.get("preferred", []):
+            if str(skill).lower() in seen_required:
+                continue
+            preferred.append(skill)
+    return required, preferred
+
+
+def compute_profile_skills_matched(
+    profile: ParsedProfile,
+    opportunity: Opportunity,
+) -> List[str]:
+    """Profile skill labels that satisfy an opportunity-relevant skill."""
+    searchable = _opportunity_search_text(opportunity)
+    entries = _opportunity_relevant_skill_entries(opportunity, profile)
+    matched: List[str] = []
+    seen: set[str] = set()
+
+    for skill in profile.skills or []:
+        norm = normalize_text(skill)
+        if not norm or norm in seen:
+            continue
+        if norm in searchable:
+            seen.add(norm)
+            matched.append(skill)
+            continue
+        token_set = {norm}
+        if any(_student_covers_skill(token_set, opp_skill) for opp_skill, _ in entries):
+            seen.add(norm)
+            matched.append(skill)
+            continue
+        if any(_skill_compare_forms(norm) & _skill_compare_forms(opp_skill) for opp_skill, _ in entries):
+            seen.add(norm)
+            matched.append(skill)
+
+    return matched
+
+
 # ---------------------------------------------------------------------------
 # Opportunity inference
 # ---------------------------------------------------------------------------
@@ -356,49 +581,38 @@ def compute_major_fit_score(profile: ParsedProfile, opportunity: Opportunity) ->
 def compute_skill_match_score(profile: ParsedProfile, opportunity: Opportunity) -> float:
     """Skill match score in [0, 1].
 
-    ML-2B / ML-2B.1: layered match. Per-token weights:
+    SCORE-AUDIT-2: opportunity-centric coverage. Extra student skills that are
+    not relevant to the opportunity do **not** dilute the score.
 
-    * **Explicit hit** — token appears in the opportunity's title /
-      requirements / declared ``skills_list`` / inferred role cluster.
-      ``1.0`` per token.
-    * **Inferred required hit** (ML-2B.1) — token only appears in the
-      role profile's ``required_skills`` for this opportunity. ``0.7``.
-    * **Generic inferred hit** — token only appears in the bucket-derived
-      ``inferred_skills`` pool. ``0.5``.
-    * **Inferred preferred hit** (ML-2B.1) — token only appears in the
-      role profile's ``preferred_skills``. ``0.4``.
+    ``skill_score = sum(tier_weight for covered opp skills) / sum(tier_weight
+    for all opportunity-relevant skills)``
 
-    Required is checked before generic, generic before preferred, so a
-    token that is both "required for this role" and a generic inferred
-    skill counts as required (0.7). Final score is the per-token average,
-    clamped to ``[0, 1]`` by the rubric's downstream code. ``TARGET_WEIGHTS``
-    is unchanged.
+    Opportunity-relevant skills follow the same layering as
+    :func:`_opportunity_relevant_skill_entries` (explicit list, then
+    interest-filtered role-cluster profiles, then bucket inferred fallback).
+
+    Tier weights: explicit ``1.0``, required ``0.7``, preferred ``0.4``,
+    inferred ``0.5``.
     """
     if not profile.skills and not profile.qualifications:
         return 0.4
 
-    searchable = _opportunity_search_text(opportunity)
-    tokens = _profile_skill_tokens(profile)
-    if not tokens:
+    entries = _opportunity_relevant_skill_entries(opportunity, profile)
+    if not entries:
         return 0.4
 
-    signals = enrich_opportunity_signals(opportunity)
-    required_blob = normalize_text(" ".join(signals.get("required_skills", []) or []))   # type: ignore[arg-type]
-    preferred_blob = normalize_text(" ".join(signals.get("preferred_skills", []) or [])) # type: ignore[arg-type]
-    inferred_blob = normalize_text(" ".join(signals.get("inferred_skills", []) or []))   # type: ignore[arg-type]
+    student = _student_skill_set(profile)
+    matched_weight = 0.0
+    total_weight = 0.0
+    for opp_skill, tier in entries:
+        weight = _SKILL_TIER_WEIGHTS.get(tier, 0.5)
+        total_weight += weight
+        if _student_covers_skill(student, opp_skill):
+            matched_weight += weight
 
-    matched = 0.0
-    for token in tokens:
-        if token in searchable:
-            matched += 1.0
-        elif required_blob and token in required_blob:
-            matched += 0.7
-        elif inferred_blob and token in inferred_blob:
-            matched += 0.5
-        elif preferred_blob and token in preferred_blob:
-            matched += 0.4
-
-    return matched / len(tokens)
+    if total_weight <= 0.0:
+        return 0.4
+    return matched_weight / total_weight
 
 
 def _role_tokens(profile: ParsedProfile) -> List[str]:
@@ -805,35 +1019,31 @@ def compute_missing_skills(
 ) -> List[str]:
     """Return opportunity skills the student does not appear to have.
 
-    ML-2B.1 ordering:
+    SCORE-AUDIT-2 ordering:
 
-    1. **Missing required** skills from the role profile (most important).
-    2. **Missing preferred** skills from the role profile.
-    3. **Remaining explicit** skills declared on the opportunity that
-       were not already covered by required / preferred.
+    1. **Explicit** ``skills_list`` gaps on the opportunity.
+    2. **Missing required** skills from interest-filtered role profiles.
+    3. **Missing preferred** skills from those role profiles.
+    4. **Bucket inferred** skills only when explicit and role lists are empty.
 
-    Notes:
-        - Case-insensitive comparison; whitespace is stripped.
-        - Noise tokens ("Not stated", "nan", "n/a", "none", "") removed.
-        - Output preserves the original spelling for explicit entries and
-          uses the lowercase profile spelling for required / preferred.
-        - Duplicates are dropped (first-seen wins) so a skill that is both
-          explicit-required and profile-required appears only once.
-        - Capped at ``max_count`` (default ``MISSING_SKILLS_MAX = 8``).
+    Backend / software role-profile skills are omitted for cybersecurity-focused
+    students so generic ``python`` / ``apis`` / ``git`` do not displace SOC gaps.
     """
     student = _student_skill_set(profile)
-    signals = enrich_opportunity_signals(opportunity)
-
-    required = signals.get("required_skills", []) or []
-    preferred = signals.get("preferred_skills", []) or []
-    explicit = opportunity.skills_list or []
+    explicit = _clean_explicit_opportunity_skills(opportunity)
+    required, preferred = _role_profile_skill_lists(opportunity, profile)
 
     seen: set[str] = set()
     out: List[str] = []
 
-    if _append_missing(required, student, seen, out, max_count):  # type: ignore[arg-type]
+    if _append_missing(explicit, student, seen, out, max_count):
         return out
-    if _append_missing(preferred, student, seen, out, max_count):  # type: ignore[arg-type]
+    if _append_missing(required, student, seen, out, max_count):
         return out
-    _append_missing(explicit, student, seen, out, max_count)
+    if _append_missing(preferred, student, seen, out, max_count):
+        return out
+
+    if not explicit and not required and not preferred:
+        inferred = enrich_opportunity_signals(opportunity).get("inferred_skills", []) or []
+        _append_missing(inferred, student, seen, out, max_count)  # type: ignore[arg-type]
     return out

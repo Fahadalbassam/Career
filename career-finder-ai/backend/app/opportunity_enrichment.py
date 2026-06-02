@@ -458,6 +458,30 @@ def _dedupe_preserve_order(values: Iterable[str]) -> List[str]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def fired_role_skill_profile_keys(opportunity: Opportunity) -> List[str]:
+    """Return ordered :data:`ROLE_SKILL_PROFILES` keys activated for an opportunity.
+
+    Combines bucket ``skill_profile_keys`` with needles found in the opportunity
+    text (title, requirements, skills_list, etc.). Used by the rubric to layer
+    role-cluster skills before company-level bucket fallbacks.
+    """
+    text = _combined_text(opportunity)
+    fired_profile_keys: List[str] = []
+
+    for bucket in _BUCKETS:
+        if not _matches_any(text, bucket["triggers"]):  # type: ignore[arg-type]
+            continue
+        for key in bucket.get("skill_profile_keys", []) or []:  # type: ignore[union-attr]
+            if isinstance(key, str) and key not in fired_profile_keys:
+                fired_profile_keys.append(key)
+
+    for key in _skill_profile_keys_from_opportunity(opportunity):
+        if key not in fired_profile_keys:
+            fired_profile_keys.append(key)
+
+    return fired_profile_keys
+
+
 def enrich_opportunity_signals(opportunity: Opportunity) -> Dict[str, object]:
     """Return weak inferred signals for an opportunity.
 
@@ -491,7 +515,6 @@ def enrich_opportunity_signals(opportunity: Opportunity) -> Dict[str, object]:
     interests: List[str] = []
     skills: List[str] = []
     inferred_role_cluster: Optional[str] = None
-    fired_profile_keys: List[str] = []
 
     for bucket in _BUCKETS:
         triggers = bucket["triggers"]  # type: ignore[index]
@@ -504,18 +527,7 @@ def enrich_opportunity_signals(opportunity: Opportunity) -> Dict[str, object]:
         if inferred_role_cluster is None:
             inferred_role_cluster = str(bucket["role_cluster"])
 
-        for key in bucket.get("skill_profile_keys", []) or []:  # type: ignore[union-attr]
-            if isinstance(key, str) and key not in fired_profile_keys:
-                fired_profile_keys.append(key)
-
-    # Also consider every profile-key whose needle appears anywhere in the
-    # opportunity's combined text (title / role_cluster / requirements /
-    # skills_list). This catches opportunities whose role signal only
-    # appears in the dataset's requirements or skills_list (e.g. a Deloitte
-    # internship whose skills_list says ``"Networking Fundamentals"``).
-    for key in _skill_profile_keys_from_opportunity(opportunity):
-        if key not in fired_profile_keys:
-            fired_profile_keys.append(key)
+    fired_profile_keys = fired_role_skill_profile_keys(opportunity)
 
     # Aggregate required / preferred from every fired profile.
     required_skills: List[str] = []

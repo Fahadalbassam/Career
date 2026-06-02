@@ -1,133 +1,104 @@
-# SCORE-AUDIT-1 — Cybersecurity COOP profile score audit
+# SCORE-AUDIT-2 — git/apis skill dilution on Bank Albilad COOP
 
-**Date:** 2026-05-29  
-**Scope:** Explain 86% top match and validate `missing_skills` for a complete cybersecurity profile. No rubric weight changes, no ML retrain, no ranking changes.
+**Date:** 2026-06-02  
+**Scope:** Explain why adding `git` and `apis` lowered the top match from 90% to 89%, fix monotonic skill scoring, align missing skills with role-cluster priority. No rubric weight changes, no ML retrain, no UI redesign.
 
 ---
 
-## Test profile (exact terminal input)
-
-```
-I am a CS student in Khobar looking for cybersecurity COOP. I know SQL, MongoDB, Linux, networking, and SIEM. I prefer on-site and I want an interview. I want to work in Security Operations.
-```
-
-### Parsed profile
+## Profiles compared
 
 | Field | Value |
 |---|---|
 | Major | CS |
+| University | IAU |
 | City | Khobar |
 | Interest | Cybersecurity |
 | Program type | COOP |
 | Work mode | On-site |
-| Skills | sql, linux, networking, cybersecurity, siem, mongodb |
 | Preferred roles | Security Operations |
-| Interview preference | Interview preferred |
+| Interview preference | Interview preferred: In person |
 
----
-
-## Top 5 results (live rubric, `score_source=rubric`)
-
-| Rank | Company | Title | Match % | City | Role cluster |
-|---:|---|---|---:|---|---|
-| 1 | Bank Albilad | Cooperative Training Program | **86** | Saudi Arabia | Cybersecurity |
-| 2 | Saudi Food & Drug Authority (SFDA) | COOP training (First semester 2025-2026 intake) | 84 | Saudi Arabia | Cybersecurity |
-| 3 | Al Rajhi Takaful | Cooperative Training Program | 84 | Riyadh | Cybersecurity |
-| 4 | NHC | COOP Trainee | 84 | Saudi Arabia | Cybersecurity |
-| 5 | (varies by dataset load) | … | 83–84 | … | … |
+| | Profile A (before) | Profile B (after) |
+|---|---|---|
+| Skills | sql, linux, networking, cybersecurity | + git, apis |
 
 Reproduce: `python scripts/debug_score_breakdown.py`
 
 ---
 
-## Why rank #1 is 86% (not 95+)
+## Top result before / after (pre-fix behavior)
 
-**Bank Albilad — Cooperative Training Program** → rubric `target_score` **86.1** → displayed **86%**.
-
-| Component | Score (0–1) | Weight | Points |
-|---|---:|---:|---:|
-| Major fit | 1.00 | 35% | 35.00 |
-| Skill fit | 0.60 | 20% | 12.00 |
-| Role/interest fit | 1.00 | 15% | 15.00 |
-| Location fit | 0.50 | 10% | 5.00 |
-| Program fit | 1.00 | 10% | 10.00 |
-| Work mode fit | 1.00 | 5% | 5.00 |
-| Source confidence | 1.00 | 3% | 3.00 |
-| Interview fit | 0.55 | 2% | 1.10 |
-| **Total** | | | **86.10** |
-
-### Explainable limitations (by design)
-
-1. **Location (0.50):** Opportunity city is broad **Saudi Arabia**, not Khobar. `FLEXIBLE_CITIES` partial match applies; not a perfect city hit.
-2. **Skill fit (0.60):** Student skills are strong, but the listing is a **generic bank COOP** enriched with Backend + Cybersecurity role profiles. Tokens such as **mongodb** do not appear in the opportunity text; **siem** only counts at the inferred-preferred weight (0.4) in the per-token average. Bank bucket also adds **python / apis / git** requirements unrelated to the student's stated stack.
-3. **Role/interest (1.00):** Interest cluster and Security Operations preference align with inferred **Cybersecurity** cluster — full credit here.
-4. **Interview (0.55):** Student wants an interview; listing text yields **Not stated** → partial credit (0.55), not 1.0.
-5. **Title specificity:** Generic “Cooperative Training Program”, not an explicit SOC / Security Operations posting — role score is boosted by enrichment, not by an exact SOC title match.
-
-The score is **conservative and explainable**; it is not artificially capped. A near-perfect score would require tighter city alignment, explicit SOC/security title language, stated interview policy, and higher explicit skill overlap on the posting.
-
----
-
-## Missing skills — valid or bug?
-
-### Before fix
-
-`missing_skills` incorrectly listed **cybersecurity fundamentals** and **security fundamentals** even though the student lists **cybersecurity**. **siem**, **linux**, and **networking** were already excluded correctly.
-
-### Root cause
-
-`compute_missing_skills` used **exact** string equality against role-profile required skills. “cybersecurity” ≠ “cybersecurity fundamentals” / “security fundamentals”.
-
-### Fix (display only)
-
-Added `_student_covers_skill()` in `backend/app/rubric.py`:
-
-- Exact match (unchanged)
-- Alias map: `cybersecurity` → fundamentals / security fundamentals / infosec
-- Prefix overlap for tokens ≥ 5 chars (e.g. `cybersecurity` in `cybersecurity fundamentals`)
-
-**Rubric weights and `match_score` were not changed.**
-
-### After fix (rank #1)
-
-```
-missing_skills: python, apis, git, soc, penetration testing, incident response, vulnerability assessment, firewall
-```
-
-These are **legitimate gaps** for a bank COOP enriched with backend + cyber profiles. They are not skills the student already listed.
-
-| Student skill | Should satisfy | Result |
+| | Profile A | Profile B |
 |---|---|---|
-| cybersecurity | cybersecurity fundamentals, security fundamentals | Yes (fixed) |
-| siem | siem | Yes (unchanged) |
-| linux | linux | Yes (unchanged) |
-| networking | networking | Yes (unchanged) |
+| Company | Bank Albilad | Bank Albilad |
+| Program | Cooperative Training Program | Cooperative Training Program |
+| Match % | **90** | **89** |
+| Skill component | 0.775 | 0.750 |
 
 ---
 
-## Changes made
+## Exact reason the score dropped (bug)
+
+**Root cause:** `compute_skill_match_score` used **student-token dilution**:
+
+```text
+skill_score = sum(per-student-token weights) / len(student_skill_tokens)
+```
+
+- Profile A: 4 tokens → weighted sum ≈ 3.1 → **0.775**
+- Profile B: 6 tokens (adds git, apis) → weighted sum ≈ 4.5 → **0.750**
+
+`git` and `apis` matched backend **required** skills from the bank bucket enrichment (weight 0.7 each), but the **denominator grew by 2**, so the average fell by 0.025. At 20% rubric weight that is **−0.5 points** on `target_score` (89.6 → 89.1 → displayed 90 → 89).
+
+No other rubric component changed (role/interest, city, program, work mode, interview were identical).
+
+**This was a bug:** adding skills that match the opportunity should not lower skill score (no explicit negative rule).
+
+---
+
+## What was fixed
 
 | Area | Change |
 |---|---|
-| `backend/app/rubric.py` | `_student_covers_skill()` for missing-skills alias/prefix coverage |
-| `backend/app/assistant_reply.py` | Use top `missing_skills`; concrete `/details 1` wording |
-| `frontend/src/lib/assistant-reply.ts` | Mirror concrete missing-skill wording in chat |
-| `scripts/debug_score_breakdown.py` | Audit script for this profile |
-| `scripts/careerfinder_cli.py` | `/details` shows compact score breakdown |
-| Tests | SCORE-AUDIT-1 cases in `test_recommender.py`, `test_assistant_reply.py` |
+| `backend/app/rubric.py` | Opportunity-centric skill score: `matched_weight / total_opportunity_weight`; extra student skills ignored |
+| `backend/app/rubric.py` | Skill layers: explicit `skills_list` → interest-filtered role profiles → bucket inferred fallback |
+| `backend/app/rubric.py` | `compute_missing_skills` uses same layering; backend profile skills filtered out for cyber-focused students |
+| `backend/app/rubric.py` | Aliases for `git`, `api`/`apis` in missing-skills coverage |
+| `backend/app/opportunity_enrichment.py` | `fired_role_skill_profile_keys()` for profile filtering |
+| `backend/app/recommender.py` | `skills_matched` via `compute_profile_skills_matched()` |
+| `scripts/debug_score_breakdown.py` | Side-by-side Profile A / B breakdown |
+| `tests/test_recommender.py` | SCORE-AUDIT-2 regression tests |
+
+**Rubric weights unchanged.**
+
+---
+
+## Results after fix
+
+| | Profile A | Profile B |
+|---|---|---|
+| Match % | **84** | **84** |
+| Skill component | 0.50 | 0.50 |
+| Missing skills (top gaps) | ITIL, siem, soc, penetration testing, … | Same |
+
+- **Monotonicity:** B skill score ≥ A (equal here); total score no longer drops when adding git/apis.
+- **Skill score 0.50:** Bank Albilad declares explicit `skills_list`: `ITIL`, `Cybersecurity Fundamentals`. Student covers fundamentals via `cybersecurity` alias → **1 of 2** explicit skills → 50% skill component (by design, not capped).
+- **Missing skills:** No longer lists `python`, `apis`, `git` for this cyber + Security Operations profile; prioritizes SOC stack gaps (siem, soc, incident response, …).
+
+---
+
+## Was a bug found?
+
+**Yes** — student-token averaging caused non-monotonic skill scores when irrelevant or backend-bucket skills were added to the profile.
 
 ---
 
 ## Conclusion
 
-**A bug was found and fixed** in `missing_skills` display (fundamentals shown despite `cybersecurity` on the profile).
-
-**The 86% score is conservative/explainable, not artificially capped.** Main drags: broad location, generic COOP title, partial skill overlap against enriched backend+cyber requirements, and interview-not-stated.
+The **90 → 89** drop in terminal testing was caused by **skill-score dilution**, not worse fit. After SCORE-AUDIT-2, adding git/apis does not reduce skill or total score for the same opportunity. Absolute match % for this listing is **84%** with the corrected explicit-skill scoring layer (conservative, explainable: broad location, generic COOP title, ITIL gap, interview not stated).
 
 ---
 
-## Demo / report recommendation
+## Prior audit
 
-- Run `python scripts/debug_score_breakdown.py` live to show the component table.
-- Use CLI `/details 1` to show breakdown + real missing skills (python, soc, …).
-- State clearly: ranking remains `match_score` from rubric; `score_source=rubric`; no ML retrain.
+See SCORE-AUDIT-1 section in git history for the complete SIEM/MongoDB terminal profile (`score_audit.md` previously covered SCORE-AUDIT-1 only).
